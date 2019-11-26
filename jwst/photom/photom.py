@@ -444,6 +444,12 @@ class DataSet():
             # Update the science dq
             self.input.dq = np.bitwise_or(self.input.dq, ftab.dq)
 
+            # Mask out NON_SCIENCE and DO_NOT_USE pixels
+            where_bad = np.bitwise_and(self.input.dq, dqflags.pixel['NON_SCIENCE'])
+            self.input.data[where_bad > 0] = 0.0
+            where_bad = np.bitwise_and(self.input.dq, dqflags.pixel['DO_NOT_USE'])
+            self.input.data[where_bad > 0] = 0.0
+            
             # Retrieve the scalar conversion factor from the reference data
             conv_factor = ftab.meta.photometry.conversion_megajanskys
 
