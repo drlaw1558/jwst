@@ -6,6 +6,7 @@ from .model_base import DataModel
 from .amilg import AmiLgModel
 from .apcorr import FgsImgApcorrModel, MirImgApcorrModel
 from .apcorr import NrcImgApcorrModel, NisImgApcorrModel
+from .apcorr import MirMrsApcorrModel
 from .asn import AsnModel
 from .barshadow import BarshadowModel
 from .combinedspec import CombinedSpecModel

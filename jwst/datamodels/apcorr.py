@@ -1,7 +1,8 @@
 from .reference import ReferenceFileModel
 
 __all__ = ['FgsImgApcorrModel', 'MirImgApcorrModel',
-           'NrcImgApcorrModel', 'NisImgApcorrModel']
+           'NrcImgApcorrModel', 'NisImgApcorrModel',
+           'MirMrsApcorrModel']
 
 
 class FgsImgApcorrModel(ReferenceFileModel):
@@ -96,3 +97,27 @@ class NisImgApcorrModel(ReferenceFileModel):
 
     """
     schema_url = "http://stsci.edu/schemas/jwst_datamodel/nisimg_apcorr.schema"
+
+class MirMrsApcorrModel(ReferenceFileModel):
+    """
+    A data model for MIRI MRS apcorr reference files.
+
+    Parameters
+    __________
+    apcorr_table : 
+        Aperture correction factors table
+        A table-like object containing row selection criteria made up
+        of instrument mode parameters and aperture correction
+        factors associated with those modes.
+
+        - wavelength: float32
+        - radius: float32
+        - inner_bkg: float32
+        - outer_bkg: float32
+        - axis_ratio: float32
+        - axis_pa: float32
+        - apcorr: float32
+        - apcorr_err: float32
+
+    """
+    schema_url = "http://stsci.edu/schemas/jwst_datamodel/mirmrs_apcorr.schema"
