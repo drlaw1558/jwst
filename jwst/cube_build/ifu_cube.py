@@ -1181,6 +1181,19 @@ class IFUCubeData():
                     x = x[valid1]
                     y = y[valid1]
 
+                    # Compute the rotation angle between alpha-beta and RA-DEC
+                    # (angle of -beta axis measured E from N)
+                    # using some arbitrary in-range wavelength
+                    ab2radec_transform = input_model.meta.wcs.get_transform('alpha_beta','world')
+                    temp_ra1, temp_dec1, _ = ab2radec_transform(0,0,wave[0])
+                    temp_ra2, temp_dec2, _ = ab2radec_transform(0,-1,wave[0])
+                    dra, ddec = (temp_ra2 - temp_ra1) * np.cos(temp_dec1), (temp_dec2 - temp_dec1)
+                    # If angle hasn't already been set, set it
+                    try:
+                        self.mrs_rang
+                    except:
+                        self.mrs_rang=np.arctan2(dra,ddec) * 180./np.pi
+
                     xind = _toindex(x)
                     yind = _toindex(y)
                     xind = np.ndarray.flatten(xind)
@@ -1863,7 +1876,7 @@ class IFUCubeData():
                 newname = self.define_cubename()
                 ifucube_model.meta.filename = newname
 # ______________________________________________________________________
-# fill in Channel for MIRI
+# fill in Channel and alpha-beta angle for MIRI
         if self.instrument == 'MIRI':
             # fill in Channel output meta data
             num_ch = len(self.list_par1)
@@ -1875,6 +1888,7 @@ class IFUCubeData():
             outchannel = "".join(sorted(outchannel))
             ifucube_model.meta.instrument.channel = outchannel
             log.info('IFUChannel %s', ifucube_model.meta.instrument.channel)
+            ifucube_model.meta.ifu.mrs_rang = self.mrs_rang
 # ______________________________________________________________________
         ifucube_model.meta.wcsinfo.crval1 = self.crval1
         ifucube_model.meta.wcsinfo.crval2 = self.crval2
