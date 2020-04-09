@@ -52,6 +52,13 @@ def radec2std(crval1, crval2, ra, dec):
     xi = -xi
     eta = eta * rad2arcsec
 
+    # DRL HACK!  Force rotation to be aligned with alpha-beta
+    mrs_rang = 8.1
+    temp1 = xi * np.cos(-mrs_rang * deg2rad) - eta * np.sin(-mrs_rang * deg2rad)
+    temp2 = xi * np.sin(-mrs_rang * deg2rad) + eta * np.cos(-mrs_rang * deg2rad)
+    xi = temp1
+    eta = temp2
+
     return xi, eta
 # ________________________________________________________________________________
 
@@ -92,6 +99,13 @@ def std2radec(crval1, crval2, xi, eta):
 
     ra0 = crval1 * deg2rad
     dec0 = crval2 * deg2rad
+
+    # DRL hack
+    mrs_rang = 8.1
+    temp1 = xi * np.cos(mrs_rang * deg2rad) - eta * np.sin(mrs_rang * deg2rad)
+    temp2 = xi * np.sin(mrs_rang * deg2rad) + eta * np.cos(mrs_rang * deg2rad)
+    xi = temp1
+    eta = temp2
 
     # tangent projection
     xi = xi / rad2arcsec
