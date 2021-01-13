@@ -108,6 +108,7 @@ SPEC2_SCIENCE_EXP_TYPES = [
     'mir_lrs-fixedslit',
     'mir_lrs-slitless',
     'mir_mrs',
+    'mir_flatmrs-ext',
     'nrs_fixedslit',
     'nrs_ifu',
     'nrs_msaspec',
