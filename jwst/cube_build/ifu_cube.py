@@ -20,6 +20,7 @@ from . import cube_build_wcs_util
 from . import cube_overlap
 from . import cube_cloud
 from . import coord
+import pdb
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
@@ -637,8 +638,8 @@ class IFUCubeData():
                                                                    subtract_background,
                                                                    ifile)
 
-                    coord1, coord2, wave, flux, err, slice_no, rois_pixel, roiw_pixel, weight_pixel,\
-                        softrad_pixel, scalerad_pixel, alpha_det, beta_det = pixelresult
+                    coord1, coord2, ccoord, wave, dwave, flux, err, slice_no, rois_pixel, roiw_pixel,\
+                        weight_pixel, softrad_pixel, scalerad_pixel, alpha_det, beta_det = pixelresult
                     # check that there is valid data returned
                     # If all the data is flagged as DO_NOT_USE - not common then log warning and skip data
                     if wave.size == 0:
@@ -673,7 +674,7 @@ class IFUCubeData():
                                                       self.spaxel_var,
                                                       flux,
                                                       err,
-                                                      coord1, coord2, wave,
+                                                      coord1, coord2, wave, dwave,
                                                       self.weighting,
                                                       rois_pixel, roiw_pixel,
                                                       weight_pixel,
@@ -681,6 +682,26 @@ class IFUCubeData():
                                                       scalerad_pixel,
                                                       cube_debug,
                                                       self.debug_file)
+                    if self.weighting == 'driz':
+                        t0 = time.time()
+                        cube_cloud.match_det2cube_driz(self.naxis1, self.naxis2, self.naxis3,
+                                                        self.cdelt1, self.cdelt2,
+                                                        self.cdelt3_normal,
+                                                        self.xcenters, self.ycenters, self.zcoord,
+                                                        self.spaxel_flux,
+                                                        self.spaxel_weight,
+                                                        self.spaxel_iflux,
+                                                        self.spaxel_var,
+                                                        flux,
+                                                        err,
+                                                        coord1, coord2, ccoord, wave, dwave,
+                                                        self.weighting,
+                                                        rois_pixel, roiw_pixel,
+                                                        weight_pixel,
+                                                        softrad_pixel,
+                                                        scalerad_pixel,
+                                                        cube_debug,
+                                                        self.debug_file)
 
                         t1 = time.time()
                         log.info("Time to match file to ifucube = %.1f s" % (t1 - t0,))
@@ -849,7 +870,7 @@ class IFUCubeData():
                                                                subtract_background,
                                                                ifile)
 
-                coord1, coord2, wave, flux, err, slice_no, rois_pixel, roiw_pixel, weight_pixel, \
+                coord1, coord2, ccoord, wave, dwave, flux, err, slice_no, rois_pixel, roiw_pixel, weight_pixel, \
                     softrad_pixel, scalerad_pixel, alpha_det, beta_det = pixelresult
 
                 cube_cloud.match_det2cube_msm(self.naxis1,
@@ -866,7 +887,7 @@ class IFUCubeData():
                                               self.spaxel_var,
                                               flux,
                                               err,
-                                              coord1, coord2, wave,
+                                              coord1, coord2, wave, dwave,
                                               self.weighting,
                                               rois_pixel, roiw_pixel,
                                               weight_pixel,
@@ -1484,6 +1505,27 @@ class IFUCubeData():
                 x = x[valid1]
                 y = y[valid1]
 
+                # Delta wavelengths
+                _,_,wave1 = input_model.meta.wcs(x, y - 0.4999)
+                _,_,wave2 = input_model.meta.wcs(x, y + 0.4999)
+                dwave = np.abs(wave1 - wave2)
+
+                # Pixel corners
+                pixfrac=1.0
+                alpha1,beta,_ = input_model.meta.wcs.transform('detector', 'alpha-beta', x-0.4999*pixfrac, y)
+                alpha2,_,_ = input_model.meta.wcs.transform('detector', 'alpha-beta', x + 0.4999 * pixfrac, y)
+                # Find slice width
+                allbetaval = np.unique(beta)
+                dbeta = np.abs(allbetaval[1] - allbetaval[0])
+                ra1, dec1, _ = input_model.meta.wcs.transform('alpha-beta', 'world', alpha1,
+                                                              beta - dbeta * pixfrac / 2., wave)
+                ra2, dec2, _ = input_model.meta.wcs.transform('alpha-beta', 'world', alpha1,
+                                                              beta + dbeta * pixfrac / 2., wave)
+                ra3, dec3, _ = input_model.meta.wcs.transform('alpha-beta', 'world', alpha2,
+                                                              beta + dbeta * pixfrac / 2., wave)
+                ra4, dec4, _ = input_model.meta.wcs.transform('alpha-beta', 'world', alpha2,
+                                                              beta - dbeta * pixfrac / 2., wave)
+
                 xind = _toindex(x)
                 yind = _toindex(y)
                 xind = np.ndarray.flatten(xind)
@@ -1605,6 +1647,7 @@ class IFUCubeData():
             err = err_all[good_data]
             wave = wave[good_data]
             slice_no = slice_no[good_data]
+            dwave = dwave[good_data]
 
             # based on the wavelength define the sroi, wroi, weight_power and
             # softrad to use in matching detector to spaxel values
@@ -1632,16 +1675,46 @@ class IFUCubeData():
 
             ra_use = ra[good_data]
             dec_use = dec[good_data]
+
+            # Corners
+            ra1_use = ra1_use[good_data]
+            dec1_use = dec1_use[good_data]
+            ra2_use = ra2_use[good_data]
+            dec2_use = dec2_use[good_data]
+            ra3_use = ra3_use[good_data]
+            dec3_use = dec3_use[good_data]
+            ra4_use = ra4_use[good_data]
+            dec4_use = dec4_use[good_data]
+
             coord1, coord2 = coord.radec2std(self.crval1,
                                              self.crval2,
                                              ra_use, dec_use,
                                              self.rot_angle)
 
+            c1_cc1, c2_cc1 = coord.radec2std(self.crval1,
+                                             self.crval2,
+                                             ra1_use, dec1_use,
+                                             self.rot_angle)
+            c1_cc2, c2_cc2 = coord.radec2std(self.crval1,
+                                             self.crval2,
+                                             ra2_use, dec2_use,
+                                             self.rot_angle)
+            c1_cc3, c2_cc3 = coord.radec2std(self.crval1,
+                                             self.crval2,
+                                             ra3_use, dec3_use,
+                                             self.rot_angle)
+            c1_cc4, c2_cc4 = coord.radec2std(self.crval1,
+                                             self.crval2,
+                                             ra4_use, dec4_use,
+                                             self.rot_angle)
+            ccoord = [c1_cc1, c2_cc1, c1_cc2, c2_cc2, c1_cc3, c2_cc3, c1_cc4, c2_cc4]
+
+
             if self.weighting == 'miripsf':
                 alpha_det = alpha[good_data]
                 beta_det = beta[good_data]
 
-        return coord1, coord2, wave, flux, err, slice_no, rois_det, roiw_det, weight_det, \
+        return coord1, coord2, ccoord, wave, dwave, flux, err, slice_no, rois_det, roiw_det, weight_det, \
             softrad_det, scalerad_det, alpha_det, beta_det
 # ********************************************************************************
 
@@ -2002,7 +2075,7 @@ class IFUCubeData():
             self.spaxel_var[good] = self.spaxel_var[good] / (self.spaxel_weight[good] * self.spaxel_weight[good])
         elif self.interpolation == 'pointcloud':
             # Don't apply any normalization if no points contributed to a spaxel (i.e., don't divide by zero)
-            good = self.spaxel_iflux > 0
+            good = self.spaxel_weight > 0
             # Normalize the weighted sum of pixel fluxes by the sum of the weights
             self.spaxel_flux[good] = self.spaxel_flux[good] / self.spaxel_weight[good]
             # Normalize the variance by the square of the weights

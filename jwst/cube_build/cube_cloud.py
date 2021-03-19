@@ -3,9 +3,193 @@ This is where the weight functions are used.
 """
 import numpy as np
 import logging
+from shapely.geometry import Polygon
+import pdb
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
+
+def match_det2cube_driz(naxis1, naxis2, naxis3,
+                       cdelt1, cdelt2,
+                       zcdelt3,
+                       xcenters, ycenters, zcoord,
+                       spaxel_flux,
+                       spaxel_weight,
+                       spaxel_iflux,
+                       spaxel_var,
+                       flux,
+                       err,
+                       coord1, coord2, ccoord, wave, dwave,
+                       weighting_type,
+                       rois_pixel, roiw_pixel, weight_pixel,
+                       softrad_pixel, scalerad_pixel,
+                       cube_debug, debug_file):
+    """ Map the detector pixels to the cube spaxels using the drizzle parameters
+
+
+    Match the Point Cloud members to the spaxel centers that fall in the drizzle
+    droplet.
+
+    Note that this routine does NOT build the cube by looping over spaxels and
+    looking for pixels that contribute to those spaxels.  The runtime is significantly
+    better to instead loop over pixels, and look for spaxels that they contribute to.
+    This way we can just keep a running sum of the weighted fluxes in a 1-d representation
+    of the output cube, which can be normalized by the weights at the end.
+
+    Parameters
+    ----------
+    naxis1 : int
+       size of the ifucube in 1st axis
+    naxis2 : int
+       size of the ifucube in 2nd axis
+    naxis3 : int
+       size of the ifucube in 3rd axis
+    cdelt1 : float
+       ifucube spaxel size in axis 1 dimension
+    cdelt2 : float
+       ifucube spaxel size in axis 2 dimension
+    cdelt3_normal :float
+       ifu spectral size at wavelength
+    rois_pixel : float
+       region of influence size in spatial dimension
+    roiw_pixel : float
+       region of influence size in spectral dimension
+    weight_power : float
+       msm weighting parameter
+    xcenter : numpy.ndarray
+       spaxel center locations 1st dimensions.
+    ycenter : numpy.ndarray
+       spaxel center locations 2nd dimensions.
+    zcoord : numpy.ndarray
+        spaxel center locations in 3rd dimensions
+    spaxel_flux : numpy.ndarray
+       contains the weighted summed detector fluxes that fall
+       within the roi
+    spaxel_weight : numpy.ndarray
+       contains the summed weights assocated with the detector fluxes
+    spaxel_iflux : numpy.ndarray
+       number of detector pixels falling with roi of spaxel center
+    spaxel_var: numpy.ndarray
+       contains the weighted summed variance within the roi
+    flux : numpy.ndarray
+       array of detector fluxes associated with each position in
+       coorr1, coord2, wave
+    err: numpy.ndarray
+       array of detector errors associated with each position in
+       coorr1, coord2, wave
+    coord1 : numpy.ndarray
+       contains the spatial coordinate for 1st dimension for the mapped
+       detector pixel
+    coord2 : numpy.ndarray
+       contains the spatial coordinate for 2nd dimension for the mapped
+       detector pixel
+    wave : numpy.ndarray
+       contains the spectral coordinate  for the mapped detector pixel
+
+    Returns
+    -------
+    spaxel_flux, spaxel_weight, spaxel_ifux, and spaxel_var updated with the information
+    from the detector pixels that fall within the roi of the spaxel center.
+    """
+    nplane = naxis1 * naxis2
+
+    # Corner coordinates
+    xcc1, ycc1 = ccoord[0], ccoord[1]
+    xcc2, ycc2 = ccoord[2], ccoord[3]
+    xcc3, ycc3 = ccoord[4], ccoord[5]
+    xcc4, ycc4 = ccoord[6], ccoord[7]
+
+    # now loop over the pixel values for this region and find the spaxels that fall
+    # within the region of interest.
+
+    nn = coord1.size
+    #    print('looping over n points mapping to cloud',nn)
+    # ________________________________________________________________________________
+    for ipt in range(0, nn - 1):
+        # xcenters, ycenters is a flattened 1-D array of the 2 X 2 xy plane
+        # cube coordinates.
+        # find the spaxels that fall withing ROI of point cloud defined  by
+        # coord1,coord2,wave
+        lower_limit = softrad_pixel[ipt]
+        xdistance = (xcenters - coord1[ipt])
+        ydistance = (ycenters - coord2[ipt])
+        radius = np.sqrt(xdistance * xdistance + ydistance * ydistance)
+
+        # Z region of interest
+        zreg = np.abs(dwave[ipt] + np.max(zcdelt3))
+
+        # Radial region of interest
+        temp12 = np.sqrt(((xcc1 - xcc2) ** 2) + ((ycc1 - ycc2) ** 2))
+        temp13 = np.sqrt(((xcc1 - xcc3) ** 2) + ((ycc1 - ycc3) ** 2))
+        temp14 = np.sqrt(((xcc1 - xcc4) ** 2) + ((ycc1 - ycc4) ** 2))
+        temp23 = np.sqrt(((xcc2 - xcc3) ** 2) + ((ycc2 - ycc3) ** 2))
+        temp24 = np.sqrt(((xcc2 - xcc4) ** 2) + ((ycc2 - ycc4) ** 2))
+        temp34 = np.sqrt(((xcc3 - xcc4) ** 2) + ((ycc3 - ycc4) ** 2))
+        rreg = np.max([temp12, temp13, temp14, temp23, temp24, temp34]) + np.max([cdelt1, cdelt2])
+
+        indexr = np.where(radius <= rreg)
+        indexz = np.where(abs(zcoord - wave[ipt]) <= zreg)
+
+        # Find the cube spectral planes that this input point will contribute to
+        if len(indexz[0]) > 0:
+            d1 = np.array(coord1[ipt] - xcenters[indexr]) / cdelt1
+            d2 = np.array(coord2[ipt] - ycenters[indexr]) / cdelt2
+            d3 = np.array(wave[ipt] - zcoord[indexz]) / zcdelt3[indexz]
+
+            dxy = (d1 * d1) + (d2 * d2)
+
+            # What is the fractional wavelength overlap?
+            ptmin, ptmax = wave[ipt] - dwave[ipt]/2. , wave[ipt] + dwave[ipt]/2.
+            spxmin, spxmax = zcoord[indexz] - zcdelt3[indexz]/2. , zcoord[indexz] + zcdelt3[indexz]/2.
+            zoverlap = np.zeros(len(indexz[0]))
+            for ii in range(0,len(indexz[0])):
+                zoverlap[ii] = max(max((spxmax[ii]-ptmin), 0) - max((spxmax[ii]-ptmax), 0) \
+                                  - max((spxmin[ii]-ptmin), 0), 0)
+            # Normalize by pixel z size
+            zoverlap = zoverlap/dwave[ipt]
+
+            # What is the fractional spatial overlap?
+            aoverlap = np.zeros(len(indexr[0]))
+            poly1 = Polygon([(xcc1[ipt],ycc1[ipt]), (xcc2[ipt],ycc2[ipt]), \
+                             (xcc3[ipt],ycc3[ipt]), (xcc4[ipt],ycc4[ipt])])
+            for ii in range(0,len(indexr[0])):
+                poly2 = Polygon([(xcenters[indexr][ii] - cdelt1/2., ycenters[indexr][ii] - cdelt2/2.), \
+                                 (xcenters[indexr][ii] - cdelt1/2., ycenters[indexr][ii] + cdelt2/2.), \
+                                 (xcenters[indexr][ii] + cdelt1/2., ycenters[indexr][ii] + cdelt2/2.), \
+                                 (xcenters[indexr][ii] + cdelt1/2., ycenters[indexr][ii] - cdelt2/2.)])
+                intersect = poly1.intersection(poly2)
+                aoverlap[ii] = intersect.area
+            # Normalize by pixel area
+            aoverlap = aoverlap/poly1.area
+
+            # shape of dxy is #indexr or number of overlaps in spatial plane
+            # shape of d3 is #indexz or number of overlaps in spectral plane
+            # shape of a_matrix & z_matrix  (#indexr, #indexz)
+            # rows = number of overlaps in spatial plane
+            # cols = number of overlaps in spectral plane
+            a_matrix = np.tile(aoverlap[np.newaxis].T, [1, d3.shape[0]])
+            z_matrix = np.tile(zoverlap, [dxy_matrix.shape[0], 1])
+
+            weight = a_matrix * z_matrix
+
+            weight = weight.flatten('F')
+            weighted_flux = weight * flux[ipt]
+            weighted_var = (weight * err[ipt]) * (weight * err[ipt])
+
+            # Identify all of the cube spaxels (ordered in a 1d vector) that this input point contributes to
+            icube_index = [iz * nplane + ir for iz in indexz[0] for ir in indexr[0]]
+
+            if cube_debug in icube_index:
+                log.info('cube_debug %i %d %d', ipt, flux[ipt], weight[icube_index.index(cube_debug)])
+
+            # Add the weighted flux and variance to running 1d cubes, along with the weights
+            # (for later normalization), and point count (for information)
+            spaxel_flux[icube_index] = spaxel_flux[icube_index] + weighted_flux
+            spaxel_weight[icube_index] = spaxel_weight[icube_index] + weight
+            spaxel_iflux[icube_index] = spaxel_iflux[icube_index] + 1
+            spaxel_var[icube_index] = spaxel_var[icube_index] + weighted_var
+
+# _______________________________________________________________________
 
 
 def match_det2cube_msm(naxis1, naxis2, naxis3,
@@ -18,7 +202,7 @@ def match_det2cube_msm(naxis1, naxis2, naxis3,
                        spaxel_var,
                        flux,
                        err,
-                       coord1, coord2, wave,
+                       coord1, coord2, wave, dwave,
                        weighting_type,
                        rois_pixel, roiw_pixel, weight_pixel,
                        softrad_pixel, scalerad_pixel,
@@ -120,22 +304,35 @@ def match_det2cube_msm(naxis1, naxis2, naxis3,
 
             dxy = (d1 * d1) + (d2 * d2)
 
+            # What is the fractional wavelength overlap?
+            ptmin, ptmax = wave[ipt] - dwave[ipt]/2. , wave[ipt] + dwave[ipt]/2.
+            spxmin, spxmax = zcoord[indexz] - zcdelt3[indexz]/2. , zcoord[indexz] + zcdelt3[indexz]/2.
+            zoverlap = np.zeros(len(indexz[0]))
+            for ii in range(0,len(indexz[0])):
+                zoverlap[ii] = max(max((spxmax[ii]-ptmin), 0) - max((spxmax[ii]-ptmax), 0) \
+                                  - max((spxmin[ii]-ptmin), 0), 0)
+            # Normalize by pixel z size
+            zoverlap = zoverlap/dwave[ipt]
+
             # shape of dxy is #indexr or number of overlaps in spatial plane
             # shape of d3 is #indexz or number of overlaps in spectral plane
             # shape of dxy_matrix & d3_matrix  (#indexr, #indexz)
             # rows = number of overlaps in spatial plane
             # cols = number of overlaps in spectral plane
             dxy_matrix = np.tile(dxy[np.newaxis].T, [1, d3.shape[0]])
-            d3_matrix = np.tile(d3 * d3, [dxy_matrix.shape[0], 1])
+            z_matrix = np.tile(zoverlap, [dxy_matrix.shape[0], 1])
 
-            # wdistance is now the spatial distance squared plus the spectral distance squared
-            wdistance = dxy_matrix + d3_matrix
+            # wdistance is now the spatial distance squared
+            wdistance = dxy_matrix
             if weighting_type == 'msm':
                 weight_distance = np.power(np.sqrt(wdistance), weight_pixel[ipt])
                 weight_distance[weight_distance < lower_limit] = lower_limit
                 weight_distance = 1.0 / weight_distance
             elif weighting_type == 'emsm':
                 weight_distance = np.exp(-wdistance / (scalerad_pixel[ipt] / cdelt1))
+
+            # Multiply in the wavelength term
+            weight_distance = weight_distance * z_matrix
 
             weight_distance = weight_distance.flatten('F')
             weighted_flux = weight_distance * flux[ipt]
