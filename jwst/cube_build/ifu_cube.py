@@ -674,7 +674,7 @@ class IFUCubeData():
                                                       self.spaxel_var,
                                                       flux,
                                                       err,
-                                                      coord1, coord2, wave, dwave,
+                                                      coord1, coord2, ccoord, wave, dwave,
                                                       self.weighting,
                                                       rois_pixel, roiw_pixel,
                                                       weight_pixel,
@@ -887,7 +887,7 @@ class IFUCubeData():
                                               self.spaxel_var,
                                               flux,
                                               err,
-                                              coord1, coord2, wave, dwave,
+                                              coord1, coord2, ccoord, wave, dwave,
                                               self.weighting,
                                               rois_pixel, roiw_pixel,
                                               weight_pixel,
@@ -1124,6 +1124,13 @@ class IFUCubeData():
 
         if self.weight_power == 0:
             self.weight_power = weight_power
+
+
+        # Rough hack to make driz method work
+        if self.weighting == 'driz':
+            self.roiw = 0.002
+            self.rois = 0.31
+
 
         # check on valid values
 
@@ -1512,18 +1519,18 @@ class IFUCubeData():
 
                 # Pixel corners
                 pixfrac=1.0
-                alpha1,beta,_ = input_model.meta.wcs.transform('detector', 'alpha-beta', x-0.4999*pixfrac, y)
-                alpha2,_,_ = input_model.meta.wcs.transform('detector', 'alpha-beta', x + 0.4999 * pixfrac, y)
+                alpha1,beta,_ = input_model.meta.wcs.transform('detector', 'alpha_beta', x-0.4999*pixfrac, y)
+                alpha2,_,_ = input_model.meta.wcs.transform('detector', 'alpha_beta', x + 0.4999 * pixfrac, y)
                 # Find slice width
                 allbetaval = np.unique(beta)
                 dbeta = np.abs(allbetaval[1] - allbetaval[0])
-                ra1, dec1, _ = input_model.meta.wcs.transform('alpha-beta', 'world', alpha1,
+                ra1, dec1, _ = input_model.meta.wcs.transform('alpha_beta', 'world', alpha1,
                                                               beta - dbeta * pixfrac / 2., wave)
-                ra2, dec2, _ = input_model.meta.wcs.transform('alpha-beta', 'world', alpha1,
+                ra2, dec2, _ = input_model.meta.wcs.transform('alpha_beta', 'world', alpha1,
                                                               beta + dbeta * pixfrac / 2., wave)
-                ra3, dec3, _ = input_model.meta.wcs.transform('alpha-beta', 'world', alpha2,
+                ra3, dec3, _ = input_model.meta.wcs.transform('alpha_beta', 'world', alpha2,
                                                               beta + dbeta * pixfrac / 2., wave)
-                ra4, dec4, _ = input_model.meta.wcs.transform('alpha-beta', 'world', alpha2,
+                ra4, dec4, _ = input_model.meta.wcs.transform('alpha_beta', 'world', alpha2,
                                                               beta - dbeta * pixfrac / 2., wave)
 
                 xind = _toindex(x)
@@ -1677,15 +1684,16 @@ class IFUCubeData():
             dec_use = dec[good_data]
 
             # Corners
-            ra1_use = ra1_use[good_data]
-            dec1_use = dec1_use[good_data]
-            ra2_use = ra2_use[good_data]
-            dec2_use = dec2_use[good_data]
-            ra3_use = ra3_use[good_data]
-            dec3_use = dec3_use[good_data]
-            ra4_use = ra4_use[good_data]
-            dec4_use = dec4_use[good_data]
+            ra1_use = ra1[good_data]
+            dec1_use = dec1[good_data]
+            ra2_use = ra2[good_data]
+            dec2_use = dec2[good_data]
+            ra3_use = ra3[good_data]
+            dec3_use = dec3[good_data]
+            ra4_use = ra4[good_data]
+            dec4_use = dec4[good_data]
 
+            # Coordinates in our potentially rotated frame
             coord1, coord2 = coord.radec2std(self.crval1,
                                              self.crval2,
                                              ra_use, dec_use,
@@ -1708,7 +1716,6 @@ class IFUCubeData():
                                              ra4_use, dec4_use,
                                              self.rot_angle)
             ccoord = [c1_cc1, c2_cc1, c1_cc2, c2_cc2, c1_cc3, c2_cc3, c1_cc4, c2_cc4]
-
 
             if self.weighting == 'miripsf':
                 alpha_det = alpha[good_data]

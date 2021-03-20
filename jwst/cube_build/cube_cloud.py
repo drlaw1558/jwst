@@ -5,6 +5,8 @@ import numpy as np
 import logging
 from shapely.geometry import Polygon
 import pdb
+from shapely.geometry import Polygon
+from shapely.strtree import STRtree
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
@@ -99,6 +101,11 @@ def match_det2cube_driz(naxis1, naxis2, naxis3,
     xcc3, ycc3 = ccoord[4], ccoord[5]
     xcc4, ycc4 = ccoord[6], ccoord[7]
 
+    xleft=xcenters-cdelt1/2.
+    xright=xcenters+cdelt1/2.
+    ybot=ycenters-cdelt2/2.
+    ytop=ycenters+cdelt2/2.
+
     # now loop over the pixel values for this region and find the spaxels that fall
     # within the region of interest.
 
@@ -108,36 +115,25 @@ def match_det2cube_driz(naxis1, naxis2, naxis3,
     for ipt in range(0, nn - 1):
         # xcenters, ycenters is a flattened 1-D array of the 2 X 2 xy plane
         # cube coordinates.
-        # find the spaxels that fall withing ROI of point cloud defined  by
+        # find the spaxels that fall within ROI of point cloud defined  by
         # coord1,coord2,wave
-        lower_limit = softrad_pixel[ipt]
-        xdistance = (xcenters - coord1[ipt])
-        ydistance = (ycenters - coord2[ipt])
-        radius = np.sqrt(xdistance * xdistance + ydistance * ydistance)
+        #lower_limit = softrad_pixel[ipt]
+        #xdistance = (xcenters - coord1[ipt])
+        #ydistance = (ycenters - coord2[ipt])
 
         # Z region of interest
         zreg = np.abs(dwave[ipt] + np.max(zcdelt3))
-
-        # Radial region of interest
-        temp12 = np.sqrt(((xcc1 - xcc2) ** 2) + ((ycc1 - ycc2) ** 2))
-        temp13 = np.sqrt(((xcc1 - xcc3) ** 2) + ((ycc1 - ycc3) ** 2))
-        temp14 = np.sqrt(((xcc1 - xcc4) ** 2) + ((ycc1 - ycc4) ** 2))
-        temp23 = np.sqrt(((xcc2 - xcc3) ** 2) + ((ycc2 - ycc3) ** 2))
-        temp24 = np.sqrt(((xcc2 - xcc4) ** 2) + ((ycc2 - ycc4) ** 2))
-        temp34 = np.sqrt(((xcc3 - xcc4) ** 2) + ((ycc3 - ycc4) ** 2))
-        rreg = np.max([temp12, temp13, temp14, temp23, temp24, temp34]) + np.max([cdelt1, cdelt2])
-
-        indexr = np.where(radius <= rreg)
         indexz = np.where(abs(zcoord - wave[ipt]) <= zreg)
+
+        # Output polygons are regular grid squares aligned with coordinate frame, which
+        # greatly simplifies search for overlap
+        indexr = np.where((xleft < np.max([xcc1[ipt],xcc2[ipt],xcc3[ipt],xcc4[ipt]])) \
+                          & (xright > np.min([xcc1[ipt],xcc2[ipt],xcc3[ipt],xcc4[ipt]])) \
+                          & (ybot < np.max([ycc1[ipt], ycc2[ipt], ycc3[ipt], ycc4[ipt]])) \
+                          & (ytop > np.min([ycc1[ipt], ycc2[ipt], ycc3[ipt], ycc4[ipt]])))
 
         # Find the cube spectral planes that this input point will contribute to
         if len(indexz[0]) > 0:
-            d1 = np.array(coord1[ipt] - xcenters[indexr]) / cdelt1
-            d2 = np.array(coord2[ipt] - ycenters[indexr]) / cdelt2
-            d3 = np.array(wave[ipt] - zcoord[indexz]) / zcdelt3[indexz]
-
-            dxy = (d1 * d1) + (d2 * d2)
-
             # What is the fractional wavelength overlap?
             ptmin, ptmax = wave[ipt] - dwave[ipt]/2. , wave[ipt] + dwave[ipt]/2.
             spxmin, spxmax = zcoord[indexz] - zcdelt3[indexz]/2. , zcoord[indexz] + zcdelt3[indexz]/2.
@@ -152,6 +148,7 @@ def match_det2cube_driz(naxis1, naxis2, naxis3,
             aoverlap = np.zeros(len(indexr[0]))
             poly1 = Polygon([(xcc1[ipt],ycc1[ipt]), (xcc2[ipt],ycc2[ipt]), \
                              (xcc3[ipt],ycc3[ipt]), (xcc4[ipt],ycc4[ipt])])
+
             for ii in range(0,len(indexr[0])):
                 poly2 = Polygon([(xcenters[indexr][ii] - cdelt1/2., ycenters[indexr][ii] - cdelt2/2.), \
                                  (xcenters[indexr][ii] - cdelt1/2., ycenters[indexr][ii] + cdelt2/2.), \
@@ -162,13 +159,13 @@ def match_det2cube_driz(naxis1, naxis2, naxis3,
             # Normalize by pixel area
             aoverlap = aoverlap/poly1.area
 
-            # shape of dxy is #indexr or number of overlaps in spatial plane
-            # shape of d3 is #indexz or number of overlaps in spectral plane
+            # shape of aoverlap is #indexr or number of overlaps in spatial plane
+            # shape of zoverlap is #indexz or number of overlaps in spectral plane
             # shape of a_matrix & z_matrix  (#indexr, #indexz)
             # rows = number of overlaps in spatial plane
             # cols = number of overlaps in spectral plane
-            a_matrix = np.tile(aoverlap[np.newaxis].T, [1, d3.shape[0]])
-            z_matrix = np.tile(zoverlap, [dxy_matrix.shape[0], 1])
+            a_matrix = np.tile(aoverlap[np.newaxis].T, [1, zoverlap.shape[0]])
+            z_matrix = np.tile(zoverlap, [a_matrix.shape[0], 1])
 
             weight = a_matrix * z_matrix
 
@@ -202,7 +199,7 @@ def match_det2cube_msm(naxis1, naxis2, naxis3,
                        spaxel_var,
                        flux,
                        err,
-                       coord1, coord2, wave, dwave,
+                       coord1, coord2, ccoord, wave, dwave,
                        weighting_type,
                        rois_pixel, roiw_pixel, weight_pixel,
                        softrad_pixel, scalerad_pixel,
@@ -278,6 +275,25 @@ def match_det2cube_msm(naxis1, naxis2, naxis3,
     """
     nplane = naxis1 * naxis2
 
+    # Corner coordinates
+    xcc1, ycc1 = ccoord[0], ccoord[1]
+    xcc2, ycc2 = ccoord[2], ccoord[3]
+    xcc3, ycc3 = ccoord[4], ccoord[5]
+    xcc4, ycc4 = ccoord[6], ccoord[7]
+
+
+
+    # Lengths of each side
+    side1 = np.sqrt((xcc1 - xcc2) ** 2 + (ycc1 - ycc2) ** 2)
+    side2 = np.sqrt((xcc2 - xcc3) ** 2 + (ycc2 - ycc3) ** 2)
+    side3 = np.sqrt((xcc3 - xcc4) ** 2 + (ycc3 - ycc4) ** 2)
+    side4 = np.sqrt((xcc4 - xcc1) ** 2 + (ycc4 - ycc1) ** 2)
+
+    # Areas of each input pixel
+    temp = np.sort([side1, side2, side3, side4])
+    parea = ((temp[0]+temp[1])/2. * (temp[2]+temp[3])/2.)
+    themed=np.median(parea)
+
     # now loop over the pixel values for this region and find the spaxels that fall
     # within the region of interest.
     nn = coord1.size
@@ -295,7 +311,6 @@ def match_det2cube_msm(naxis1, naxis2, naxis3,
 
         indexr = np.where(radius <= rois_pixel[ipt])
         indexz = np.where(abs(zcoord - wave[ipt]) <= roiw_pixel[ipt])
-
         # Find the cube spectral planes that this input point will contribute to
         if len(indexz[0]) > 0:
             d1 = np.array(coord1[ipt] - xcenters[indexr]) / cdelt1
@@ -322,6 +337,9 @@ def match_det2cube_msm(naxis1, naxis2, naxis3,
             dxy_matrix = np.tile(dxy[np.newaxis].T, [1, d3.shape[0]])
             z_matrix = np.tile(zoverlap, [dxy_matrix.shape[0], 1])
 
+            # Area of the input pixel?
+
+
             # wdistance is now the spatial distance squared
             wdistance = dxy_matrix
             if weighting_type == 'msm':
@@ -331,8 +349,11 @@ def match_det2cube_msm(naxis1, naxis2, naxis3,
             elif weighting_type == 'emsm':
                 weight_distance = np.exp(-wdistance / (scalerad_pixel[ipt] / cdelt1))
 
+            #if (ipt == 30000):
+            #    pdb.set_trace()
+
             # Multiply in the wavelength term
-            weight_distance = weight_distance * z_matrix
+            weight_distance = weight_distance * z_matrix #* parea[ipt]
 
             weight_distance = weight_distance.flatten('F')
             weighted_flux = weight_distance * flux[ipt]
