@@ -374,6 +374,148 @@ def match_det2cube_msm(naxis1, naxis2, naxis3,
 
 # _______________________________________________________________________
 
+def match_det2cube_oldmsm(naxis1, naxis2, naxis3,
+                       cdelt1, cdelt2,
+                       zcdelt3,
+                       xcenters, ycenters, zcoord,
+                       spaxel_flux,
+                       spaxel_weight,
+                       spaxel_iflux,
+                       spaxel_var,
+                       flux,
+                       err,
+                       coord1, coord2, ccoord, wave, dwave,
+                       weighting_type,
+                       rois_pixel, roiw_pixel, weight_pixel,
+                       softrad_pixel, scalerad_pixel,
+                       cube_debug, debug_file):
+    """ Map the detector pixels to the cube spaxels using the MSM parameters
+    Match the Point Cloud members to the spaxel centers that fall in the ROI.
+    For each spaxel the coord1,coord1 and wave point cloud members are weighed
+    according to modified shepard method of inverse weighting based on the
+    distance between the point cloud member and the spaxel center.
+    Note that this routine does NOT build the cube by looping over spaxels and
+    looking for pixels that contribute to those spaxels.  The runtime is significantly
+    better to instead loop over pixels, and look for spaxels that they contribute to.
+    This way we can just keep a running sum of the weighted fluxes in a 1-d representation
+    of the output cube, which can be normalized by the weights at the end.
+    Parameters
+    ----------
+    naxis1 : int
+       size of the ifucube in 1st axis
+    naxis2 : int
+       size of the ifucube in 2nd axis
+    naxis3 : int
+       size of the ifucube in 3rd axis
+    cdelt1 : float
+       ifucube spaxel size in axis 1 dimension
+    cdelt2 : float
+       ifucube spaxel size in axis 2 dimension
+    cdelt3_normal :float
+       ifu spectral size at wavelength
+    rois_pixel : float
+       region of influence size in spatial dimension
+    roiw_pixel : float
+       region of influence size in spectral dimension
+    weight_power : float
+       msm weighting parameter
+    xcenter : numpy.ndarray
+       spaxel center locations 1st dimensions.
+    ycenter : numpy.ndarray
+       spaxel center locations 2nd dimensions.
+    zcoord : numpy.ndarray
+        spaxel center locations in 3rd dimensions
+    spaxel_flux : numpy.ndarray
+       contains the weighted summed detector fluxes that fall
+       within the roi
+    spaxel_weight : numpy.ndarray
+       contains the summed weights assocated with the detector fluxes
+    spaxel_iflux : numpy.ndarray
+       number of detector pixels falling with roi of spaxel center
+    spaxel_var: numpy.ndarray
+       contains the weighted summed variance within the roi
+    flux : numpy.ndarray
+       array of detector fluxes associated with each position in
+       coorr1, coord2, wave
+    err: numpy.ndarray
+       array of detector errors associated with each position in
+       coorr1, coord2, wave
+    coord1 : numpy.ndarray
+       contains the spatial coordinate for 1st dimension for the mapped
+       detector pixel
+    coord2 : numpy.ndarray
+       contains the spatial coordinate for 2nd dimension for the mapped
+       detector pixel
+    wave : numpy.ndarray
+       contains the spectral coordinate  for the mapped detector pixel
+    Returns
+    -------
+    spaxel_flux, spaxel_weight, spaxel_ifux, and spaxel_var updated with the information
+    from the detector pixels that fall within the roi of the spaxel center.
+    """
+    nplane = naxis1 * naxis2
+
+    # now loop over the pixel values for this region and find the spaxels that fall
+    # within the region of interest.
+    nn = coord1.size
+    #    print('looping over n points mapping to cloud',nn)
+    # ________________________________________________________________________________
+    for ipt in range(0, nn - 1):
+        # xcenters, ycenters is a flattened 1-D array of the 2 X 2 xy plane
+        # cube coordinates.
+        # find the spaxels that fall withing ROI of point cloud defined  by
+        # coord1,coord2,wave
+        lower_limit = softrad_pixel[ipt]
+        xdistance = (xcenters - coord1[ipt])
+        ydistance = (ycenters - coord2[ipt])
+        radius = np.sqrt(xdistance * xdistance + ydistance * ydistance)
+
+        indexr = np.where(radius <= rois_pixel[ipt])
+        indexz = np.where(abs(zcoord - wave[ipt]) <= roiw_pixel[ipt])
+
+        # Find the cube spectral planes that this input point will contribute to
+        if len(indexz[0]) > 0:
+            d1 = np.array(coord1[ipt] - xcenters[indexr]) / cdelt1
+            d2 = np.array(coord2[ipt] - ycenters[indexr]) / cdelt2
+            d3 = np.array(wave[ipt] - zcoord[indexz]) / zcdelt3[indexz]
+
+            dxy = (d1 * d1) + (d2 * d2)
+
+            # shape of dxy is #indexr or number of overlaps in spatial plane
+            # shape of d3 is #indexz or number of overlaps in spectral plane
+            # shape of dxy_matrix & d3_matrix  (#indexr, #indexz)
+            # rows = number of overlaps in spatial plane
+            # cols = number of overlaps in spectral plane
+            dxy_matrix = np.tile(dxy[np.newaxis].T, [1, d3.shape[0]])
+            d3_matrix = np.tile(d3 * d3, [dxy_matrix.shape[0], 1])
+
+            # wdistance is now the spatial distance squared plus the spectral distance squared
+            wdistance = dxy_matrix + d3_matrix
+            if weighting_type == 'msm':
+                weight_distance = np.power(np.sqrt(wdistance), weight_pixel[ipt])
+                weight_distance[weight_distance < lower_limit] = lower_limit
+                weight_distance = 1.0 / weight_distance
+            elif weighting_type == 'emsm':
+                weight_distance = np.exp(-wdistance / (scalerad_pixel[ipt] / cdelt1))
+
+            weight_distance = weight_distance.flatten('F')
+            weighted_flux = weight_distance * flux[ipt]
+            weighted_var = (weight_distance * err[ipt]) * (weight_distance * err[ipt])
+
+            # Identify all of the cube spaxels (ordered in a 1d vector) that this input point contributes to
+            icube_index = [iz * nplane + ir for iz in indexz[0] for ir in indexr[0]]
+
+            if cube_debug in icube_index:
+                log.info('cube_debug %i %d %d', ipt, flux[ipt], weight_distance[icube_index.index(cube_debug)])
+
+            # Add the weighted flux and variance to running 1d cubes, along with the weights
+            # (for later normalization), and point count (for information)
+            spaxel_flux[icube_index] = spaxel_flux[icube_index] + weighted_flux
+            spaxel_weight[icube_index] = spaxel_weight[icube_index] + weight_distance
+            spaxel_iflux[icube_index] = spaxel_iflux[icube_index] + 1
+            spaxel_var[icube_index] = spaxel_var[icube_index] + weighted_var
+
+
 
 def match_det2cube_miripsf(alpha_resol, beta_resol, wave_resol,
                            naxis1, naxis2, naxis3,

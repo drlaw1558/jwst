@@ -682,6 +682,7 @@ class IFUCubeData():
                                                       scalerad_pixel,
                                                       cube_debug,
                                                       self.debug_file)
+
                     if self.weighting == 'driz':
                         t0 = time.time()
                         cube_cloud.match_det2cube_driz(self.naxis1, self.naxis2, self.naxis3,
