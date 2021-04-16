@@ -7,6 +7,7 @@ from shapely.geometry import Polygon
 import pdb
 from shapely.geometry import Polygon
 from shapely.strtree import STRtree
+from astropy.io import fits
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
@@ -21,7 +22,7 @@ def match_det2cube_driz(naxis1, naxis2, naxis3,
                        spaxel_var,
                        flux,
                        err,
-                       coord1, coord2, ccoord, wave, dwave,
+                       coord1, coord2, ccdx, ccdy,  ccoord, wave, dwave,
                        weighting_type,
                        rois_pixel, roiw_pixel, weight_pixel,
                        softrad_pixel, scalerad_pixel,
@@ -94,12 +95,16 @@ def match_det2cube_driz(naxis1, naxis2, naxis3,
     from the detector pixels that fall within the roi of the spaxel center.
     """
     nplane = naxis1 * naxis2
-
+    drl_count=0
     # Corner coordinates
     xcc1, ycc1 = ccoord[0], ccoord[1]
     xcc2, ycc2 = ccoord[2], ccoord[3]
     xcc3, ycc3 = ccoord[4], ccoord[5]
     xcc4, ycc4 = ccoord[6], ccoord[7]
+
+    all_normA=spaxel_flux.copy()
+    all_normW=spaxel_flux.copy()
+    all_size=spaxel_flux.copy()*0.
 
     xleft=xcenters-cdelt1/2.
     xright=xcenters+cdelt1/2.
@@ -141,8 +146,8 @@ def match_det2cube_driz(naxis1, naxis2, naxis3,
             for ii in range(0,len(indexz[0])):
                 zoverlap[ii] = max(max((spxmax[ii]-ptmin), 0) - max((spxmax[ii]-ptmax), 0) \
                                   - max((spxmin[ii]-ptmin), 0), 0)
-            # Normalize by pixel z size
-            zoverlap = zoverlap/dwave[ipt]
+            # Normalize by pixel z size to make this the FRACTIONAL overlap
+            zoverlap = zoverlap#/dwave[ipt]
 
             # What is the fractional spatial overlap?
             aoverlap = np.zeros(len(indexr[0]))
@@ -156,8 +161,8 @@ def match_det2cube_driz(naxis1, naxis2, naxis3,
                                  (xcenters[indexr][ii] + cdelt1/2., ycenters[indexr][ii] - cdelt2/2.)])
                 intersect = poly1.intersection(poly2)
                 aoverlap[ii] = intersect.area
-            # Normalize by pixel area
-            aoverlap = aoverlap/poly1.area
+            # Normalize by pixel area to make aoverlap the FRACTIONAL overlap
+            aoverlap = aoverlap#/poly1.area
 
             # shape of aoverlap is #indexr or number of overlaps in spatial plane
             # shape of zoverlap is #indexz or number of overlaps in spectral plane
@@ -170,11 +175,28 @@ def match_det2cube_driz(naxis1, naxis2, naxis3,
             weight = a_matrix * z_matrix
 
             weight = weight.flatten('F')
-            weighted_flux = weight * flux[ipt]
+
+            # Normalization factor is the ratio of input to output spatial area (pixel size vs spaxel area)
+            # times the ratio of input to output spectral length.  This is s2 in Fruchter+Hook terms.
+            normfac_A = poly1.area/(cdelt1*cdelt2)
+            normfac_W = dwave[ipt] / np.median(zcdelt3[indexz])
+            normfac=1#normfac_A#*normfac_W
+
+            weighted_flux = weight * flux[ipt] * normfac
             weighted_var = (weight * err[ipt]) * (weight * err[ipt])
 
             # Identify all of the cube spaxels (ordered in a 1d vector) that this input point contributes to
             icube_index = [iz * nplane + ir for iz in indexz[0] for ir in indexr[0]]
+
+            # Debug: Print detector pixels corresponding to a given cube spaxel in Ch4
+            if (np.min(zcoord) > 60):
+                temp=np.unravel_index(icube_index,[naxis3,naxis2,naxis1])
+                tempz, tempy, tempx = temp[0], temp[1], temp[2]
+                match = np.where((tempz == 195) & (tempy == 12) & (tempx == 10))#188,195,200  25.063 microns
+                if (len(match[0]) > 0):
+                    drl_count = drl_count+1
+                    print(ccdx[ipt],ccdy[ipt],coord1[ipt],coord2[ipt],weight[match][0],flux[ipt])
+                    #pdb.set_trace()
 
             if cube_debug in icube_index:
                 log.info('cube_debug %i %d %d', ipt, flux[ipt], weight[icube_index.index(cube_debug)])
@@ -186,6 +208,42 @@ def match_det2cube_driz(naxis1, naxis2, naxis3,
             spaxel_iflux[icube_index] = spaxel_iflux[icube_index] + 1
             spaxel_var[icube_index] = spaxel_var[icube_index] + weighted_var
 
+            all_size[ipt]=poly1.area
+            all_normA[icube_index] = all_normA[icube_index] + normfac_A
+            all_normW[icube_index] = all_normW[icube_index] + normfac_W
+    # Debug: write out some files
+    if (np.min(zcoord) > 0):
+        temp1 = spaxel_flux.reshape((naxis3,naxis2,naxis1))
+        temp2 = spaxel_weight.reshape((naxis3,naxis2,naxis1))
+        temp3 = all_normA.reshape((naxis3,naxis2,naxis1))
+        temp4 = all_normW.reshape((naxis3, naxis2, naxis1))
+        temp5 = spaxel_iflux.reshape((naxis3, naxis2, naxis1))
+        temp3=temp3/temp5
+        temp4=temp4/temp5
+        badval=np.where(temp5 == 0)
+        temp3[badval]=0
+        temp4[badval]=0
+        hdu1 = fits.PrimaryHDU(temp1)
+        hdu2 = fits.PrimaryHDU(temp2)
+        hdu3 = fits.PrimaryHDU(temp3)
+        hdu4 = fits.PrimaryHDU(temp4)
+        hdu5 = fits.PrimaryHDU(temp5)
+        hdu1.writeto('flux.fits', overwrite=True)
+        hdu2.writeto('weight.fits', overwrite=True)
+        hdu3.writeto('allnormA.fits', overwrite=True)
+        hdu4.writeto('allnormW.fits', overwrite=True)
+        hdu5.writeto('npoint.fits',overwrite=True)
+        #pdb.set_trace()
+        #atemp=np.zeros([1032,1024])
+        #xtemp=np.arange(1032)
+        #ytemp=np.arange(1032)
+        #for qq in range(0,1032):
+        #    for rr in range(0,1028):
+        #        indx=np.where((ccdx == qq)&(ccdy == rr))
+        #        if (len(indx[0]) > 0):
+        #            atemp[ccdy[indx],ccdx[indx]]=all_size[indx]
+        #pdb.set_trace()
+    #spaxel_weight[:] = 1.0  # For drizzle method we don't want to do any more normalization later!!
 # _______________________________________________________________________
 
 
@@ -352,6 +410,11 @@ def match_det2cube_msm(naxis1, naxis2, naxis3,
             #if (ipt == 30000):
             #    pdb.set_trace()
 
+            # Normalization factor is the ratio of input to output spatial area (pixel size vs spaxel area)
+            # times the ratio of input to output spectral length
+            pdb.set_trace()
+            #normfac = (poly1.area/(cdelt1*cdelt2)) * (dwave[ipt]/np.median(zcdelt3[indexz]))
+
             # Multiply in the wavelength term
             weight_distance = weight_distance * z_matrix #* parea[ipt]
 
@@ -371,7 +434,14 @@ def match_det2cube_msm(naxis1, naxis2, naxis3,
             spaxel_weight[icube_index] = spaxel_weight[icube_index] + weight_distance
             spaxel_iflux[icube_index] = spaxel_iflux[icube_index] + 1
             spaxel_var[icube_index] = spaxel_var[icube_index] + weighted_var
-
+    if (np.min(zcoord) > 20):
+        temp1 = spaxel_flux.reshape((737, 25, 27))
+        temp2 = spaxel_weight.reshape((737, 25, 27))
+        hdu1 = fits.PrimaryHDU(temp1)
+        hdu2 = fits.PrimaryHDU(temp2)
+        hdu1.writeto('flux.fits', overwrite=True)
+        hdu2.writeto('weight.fits', overwrite=True)
+        #pdb.set_trace()
 # _______________________________________________________________________
 
 def match_det2cube_oldmsm(naxis1, naxis2, naxis3,
@@ -384,7 +454,7 @@ def match_det2cube_oldmsm(naxis1, naxis2, naxis3,
                        spaxel_var,
                        flux,
                        err,
-                       coord1, coord2, ccoord, wave, dwave,
+                       coord1, coord2, ccdx, ccdy, ccoord, wave, dwave,
                        weighting_type,
                        rois_pixel, roiw_pixel, weight_pixel,
                        softrad_pixel, scalerad_pixel,
@@ -455,6 +525,19 @@ def match_det2cube_oldmsm(naxis1, naxis2, naxis3,
     """
     nplane = naxis1 * naxis2
 
+    #allarea=np.zeros(coord1.size)
+    #if (naxis3 == 647):
+    #    avgsize=0.0975
+    #if (naxis3 == 544):
+    #    avgsize=0.178
+
+
+    # Corner coordinates (NEW)
+    #xcc1, ycc1 = ccoord[0], ccoord[1]
+    #xcc2, ycc2 = ccoord[2], ccoord[3]
+    #xcc3, ycc3 = ccoord[4], ccoord[5]
+    #xcc4, ycc4 = ccoord[6], ccoord[7]
+
     # now loop over the pixel values for this region and find the spaxels that fall
     # within the region of interest.
     nn = coord1.size
@@ -499,7 +582,18 @@ def match_det2cube_oldmsm(naxis1, naxis2, naxis3,
                 weight_distance = np.exp(-wdistance / (scalerad_pixel[ipt] / cdelt1))
 
             weight_distance = weight_distance.flatten('F')
-            weighted_flux = weight_distance * flux[ipt]
+
+            # New stuff
+            #poly1 = Polygon([(xcc1[ipt],ycc1[ipt]), (xcc2[ipt],ycc2[ipt]), \
+            #                 (xcc3[ipt],ycc3[ipt]), (xcc4[ipt],ycc4[ipt])])
+            #normfac = (poly1.area / (cdelt1 * cdelt2)) * (dwave[ipt] / np.median(zcdelt3[indexz]))
+            #normfac = poly1.area / (cdelt1 * cdelt2)
+            #normfac = poly1.area/avgsize
+            #allarea[ipt]=poly1.area
+
+            weight_distance = weight_distance#*normfac
+
+            weighted_flux = weight_distance * flux[ipt]#/normfac
             weighted_var = (weight_distance * err[ipt]) * (weight_distance * err[ipt])
 
             # Identify all of the cube spaxels (ordered in a 1d vector) that this input point contributes to
@@ -514,7 +608,7 @@ def match_det2cube_oldmsm(naxis1, naxis2, naxis3,
             spaxel_weight[icube_index] = spaxel_weight[icube_index] + weight_distance
             spaxel_iflux[icube_index] = spaxel_iflux[icube_index] + 1
             spaxel_var[icube_index] = spaxel_var[icube_index] + weighted_var
-
+    #pdb.set_trace()
 
 
 def match_det2cube_miripsf(alpha_resol, beta_resol, wave_resol,

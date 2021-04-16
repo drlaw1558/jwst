@@ -638,7 +638,7 @@ class IFUCubeData():
                                                                    subtract_background,
                                                                    ifile)
 
-                    coord1, coord2, ccoord, wave, dwave, flux, err, slice_no, rois_pixel, roiw_pixel,\
+                    coord1, coord2, ccdx,ccdy, ccoord, wave, dwave, flux, err, slice_no, rois_pixel, roiw_pixel,\
                         weight_pixel, softrad_pixel, scalerad_pixel, alpha_det, beta_det = pixelresult
                     # check that there is valid data returned
                     # If all the data is flagged as DO_NOT_USE - not common then log warning and skip data
@@ -664,7 +664,7 @@ class IFUCubeData():
                         log.warning(f'No valid data found on file {ifile.meta.filename}')
                     if self.weighting == 'msm' or self.weighting == 'emsm':
                         t0 = time.time()
-                        cube_cloud.match_det2cube_msm(self.naxis1, self.naxis2, self.naxis3,
+                        cube_cloud.match_det2cube_oldmsm(self.naxis1, self.naxis2, self.naxis3,
                                                       self.cdelt1, self.cdelt2,
                                                       self.cdelt3_normal,
                                                       self.xcenters, self.ycenters, self.zcoord,
@@ -674,7 +674,7 @@ class IFUCubeData():
                                                       self.spaxel_var,
                                                       flux,
                                                       err,
-                                                      coord1, coord2, ccoord, wave, dwave,
+                                                      coord1, coord2, ccdx, ccdy, ccoord, wave, dwave,
                                                       self.weighting,
                                                       rois_pixel, roiw_pixel,
                                                       weight_pixel,
@@ -695,7 +695,7 @@ class IFUCubeData():
                                                         self.spaxel_var,
                                                         flux,
                                                         err,
-                                                        coord1, coord2, ccoord, wave, dwave,
+                                                        coord1, coord2, ccdx, ccdy, ccoord, wave, dwave,
                                                         self.weighting,
                                                         rois_pixel, roiw_pixel,
                                                         weight_pixel,
@@ -874,7 +874,7 @@ class IFUCubeData():
                 coord1, coord2, ccoord, wave, dwave, flux, err, slice_no, rois_pixel, roiw_pixel, weight_pixel, \
                     softrad_pixel, scalerad_pixel, alpha_det, beta_det = pixelresult
 
-                cube_cloud.match_det2cube_msm(self.naxis1,
+                cube_cloud.match_det2cube_oldmsm(self.naxis1,
                                               self.naxis2,
                                               self.naxis3,
                                               self.cdelt1, self.cdelt2,
@@ -888,7 +888,7 @@ class IFUCubeData():
                                               self.spaxel_var,
                                               flux,
                                               err,
-                                              coord1, coord2, ccoord, wave, dwave,
+                                              coord1, coord2, ccdx, ccdy, ccoord, wave, dwave,
                                               self.weighting,
                                               rois_pixel, roiw_pixel,
                                               weight_pixel,
@@ -1512,16 +1512,18 @@ class IFUCubeData():
                 wave = wave[valid1]
                 x = x[valid1]
                 y = y[valid1]
+                ccdx=x.copy()
+                ccdy=y.copy()
 
                 # Delta wavelengths
-                _,_,wave1 = input_model.meta.wcs(x, y - 0.4999)
-                _,_,wave2 = input_model.meta.wcs(x, y + 0.4999)
+                _,_,wave1 = input_model.meta.wcs(x, y - 0.49999)
+                _,_,wave2 = input_model.meta.wcs(x, y + 0.49999)
                 dwave = np.abs(wave1 - wave2)
 
                 # Pixel corners
                 pixfrac=1.0
-                alpha1,beta,_ = input_model.meta.wcs.transform('detector', 'alpha_beta', x-0.4999*pixfrac, y)
-                alpha2,_,_ = input_model.meta.wcs.transform('detector', 'alpha_beta', x + 0.4999 * pixfrac, y)
+                alpha1,beta,_ = input_model.meta.wcs.transform('detector', 'alpha_beta', x-0.49999*pixfrac, y)
+                alpha2,_,_ = input_model.meta.wcs.transform('detector', 'alpha_beta', x + 0.49999 * pixfrac, y)
                 # Find slice width
                 allbetaval = np.unique(beta)
                 dbeta = np.abs(allbetaval[1] - allbetaval[0])
@@ -1533,6 +1535,24 @@ class IFUCubeData():
                                                               beta + dbeta * pixfrac / 2., wave)
                 ra4, dec4, _ = input_model.meta.wcs.transform('alpha_beta', 'world', alpha2,
                                                               beta - dbeta * pixfrac / 2., wave)
+
+                # Pixel corners
+                #pixfrac=1.0
+                #alpha1,beta,_ = input_model.meta.wcs.transform('detector', 'alpha_beta', x-0.4999*pixfrac, y-0.4999)
+                #alpha2,_,_ = input_model.meta.wcs.transform('detector', 'alpha_beta', x - 0.4999 * pixfrac, y+0.4999)
+                #alpha3, _, _ = input_model.meta.wcs.transform('detector', 'alpha_beta', x + 0.4999 * pixfrac, y+0.4999)
+                #alpha4, _, _ = input_model.meta.wcs.transform('detector', 'alpha_beta', x + 0.4999 * pixfrac, y-0.4999)
+                # Find slice width
+                #allbetaval = np.unique(beta)
+                #dbeta = np.abs(allbetaval[1] - allbetaval[0])
+                #ra1, dec1, _ = input_model.meta.wcs.transform('alpha_beta', 'world', alpha1,
+                #                                              beta - dbeta * pixfrac / 2., wave)
+                #ra2, dec2, _ = input_model.meta.wcs.transform('alpha_beta', 'world', alpha2,
+                #                                              beta + dbeta * pixfrac / 2., wave)
+                #ra3, dec3, _ = input_model.meta.wcs.transform('alpha_beta', 'world', alpha3,
+                #                                              beta + dbeta * pixfrac / 2., wave)
+                #ra4, dec4, _ = input_model.meta.wcs.transform('alpha_beta', 'world', alpha4,
+                #                                              beta - dbeta * pixfrac / 2., wave)
 
                 xind = _toindex(x)
                 yind = _toindex(y)
@@ -1683,6 +1703,8 @@ class IFUCubeData():
 
             ra_use = ra[good_data]
             dec_use = dec[good_data]
+            ccdx=ccdx[good_data]
+            ccdy=ccdy[good_data]
 
             # Corners
             ra1_use = ra1[good_data]
@@ -1722,7 +1744,7 @@ class IFUCubeData():
                 alpha_det = alpha[good_data]
                 beta_det = beta[good_data]
 
-        return coord1, coord2, ccoord, wave, dwave, flux, err, slice_no, rois_det, roiw_det, weight_det, \
+        return coord1, coord2, ccdx, ccdy, ccoord, wave, dwave, flux, err, slice_no, rois_det, roiw_det, weight_det, \
             softrad_det, scalerad_det, alpha_det, beta_det
 # ********************************************************************************
 
