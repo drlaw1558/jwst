@@ -2078,7 +2078,9 @@ class IFUCubeData():
             self.spaxel_var[good] = self.spaxel_var[good] / (self.spaxel_weight[good] * self.spaxel_weight[good])
         elif self.interpolation == 'pointcloud':
             # Don't apply any normalization if no points contributed to a spaxel (i.e., don't divide by zero)
-            good = self.spaxel_iflux > 0
+            #good = self.spaxel_iflux > 0
+            # Change to spaxel_weight
+            good = self.spaxel_weight > 0
             # Normalize the weighted sum of pixel fluxes by the sum of the weights
             self.spaxel_flux[good] = self.spaxel_flux[good] / self.spaxel_weight[good]
             # Normalize the variance by the square of the weights
