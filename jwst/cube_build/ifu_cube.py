@@ -664,7 +664,7 @@ class IFUCubeData():
                         log.warning(f'No valid data found on file {ifile.meta.filename}')
                     if self.weighting == 'msm' or self.weighting == 'emsm':
                         t0 = time.time()
-                        cube_cloud.match_det2cube_oldmsm(self.naxis1, self.naxis2, self.naxis3,
+                        cube_cloud.match_det2cube_msm(self.naxis1, self.naxis2, self.naxis3,
                                                       self.cdelt1, self.cdelt2,
                                                       self.cdelt3_normal,
                                                       self.xcenters, self.ycenters, self.zcoord,
@@ -874,7 +874,7 @@ class IFUCubeData():
                 coord1, coord2, ccoord, wave, dwave, flux, err, slice_no, rois_pixel, roiw_pixel, weight_pixel, \
                     softrad_pixel, scalerad_pixel, alpha_det, beta_det = pixelresult
 
-                cube_cloud.match_det2cube_oldmsm(self.naxis1,
+                cube_cloud.match_det2cube_msm(self.naxis1,
                                               self.naxis2,
                                               self.naxis3,
                                               self.cdelt1, self.cdelt2,

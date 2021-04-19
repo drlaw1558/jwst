@@ -257,7 +257,7 @@ def match_det2cube_msm(naxis1, naxis2, naxis3,
                        spaxel_var,
                        flux,
                        err,
-                       coord1, coord2, ccoord, wave, dwave,
+                       coord1, coord2, ccdx, ccdy, ccoord, wave, dwave,
                        weighting_type,
                        rois_pixel, roiw_pixel, weight_pixel,
                        softrad_pixel, scalerad_pixel,
@@ -385,7 +385,7 @@ def match_det2cube_msm(naxis1, naxis2, naxis3,
                 zoverlap[ii] = max(max((spxmax[ii]-ptmin), 0) - max((spxmax[ii]-ptmax), 0) \
                                   - max((spxmin[ii]-ptmin), 0), 0)
             # Normalize by pixel z size
-            zoverlap = zoverlap/dwave[ipt]
+            zoverlap = zoverlap#/dwave[ipt]
 
             # shape of dxy is #indexr or number of overlaps in spatial plane
             # shape of d3 is #indexz or number of overlaps in spectral plane
@@ -412,11 +412,15 @@ def match_det2cube_msm(naxis1, naxis2, naxis3,
 
             # Normalization factor is the ratio of input to output spatial area (pixel size vs spaxel area)
             # times the ratio of input to output spectral length
-            pdb.set_trace()
+            #pdb.set_trace()
             #normfac = (poly1.area/(cdelt1*cdelt2)) * (dwave[ipt]/np.median(zcdelt3[indexz]))
 
+            poly1 = Polygon([(xcc1[ipt],ycc1[ipt]), (xcc2[ipt],ycc2[ipt]), \
+                             (xcc3[ipt],ycc3[ipt]), (xcc4[ipt],ycc4[ipt])])
+            normfac = poly1.area
+
             # Multiply in the wavelength term
-            weight_distance = weight_distance * z_matrix #* parea[ipt]
+            weight_distance = weight_distance * z_matrix *normfac
 
             weight_distance = weight_distance.flatten('F')
             weighted_flux = weight_distance * flux[ipt]
@@ -434,7 +438,7 @@ def match_det2cube_msm(naxis1, naxis2, naxis3,
             spaxel_weight[icube_index] = spaxel_weight[icube_index] + weight_distance
             spaxel_iflux[icube_index] = spaxel_iflux[icube_index] + 1
             spaxel_var[icube_index] = spaxel_var[icube_index] + weighted_var
-    if (np.min(zcoord) > 20):
+    if (np.min(zcoord) > 60):
         temp1 = spaxel_flux.reshape((737, 25, 27))
         temp2 = spaxel_weight.reshape((737, 25, 27))
         hdu1 = fits.PrimaryHDU(temp1)
@@ -533,10 +537,10 @@ def match_det2cube_oldmsm(naxis1, naxis2, naxis3,
 
 
     # Corner coordinates (NEW)
-    #xcc1, ycc1 = ccoord[0], ccoord[1]
-    #xcc2, ycc2 = ccoord[2], ccoord[3]
-    #xcc3, ycc3 = ccoord[4], ccoord[5]
-    #xcc4, ycc4 = ccoord[6], ccoord[7]
+    xcc1, ycc1 = ccoord[0], ccoord[1]
+    xcc2, ycc2 = ccoord[2], ccoord[3]
+    xcc3, ycc3 = ccoord[4], ccoord[5]
+    xcc4, ycc4 = ccoord[6], ccoord[7]
 
     # now loop over the pixel values for this region and find the spaxels that fall
     # within the region of interest.
@@ -584,14 +588,15 @@ def match_det2cube_oldmsm(naxis1, naxis2, naxis3,
             weight_distance = weight_distance.flatten('F')
 
             # New stuff
-            #poly1 = Polygon([(xcc1[ipt],ycc1[ipt]), (xcc2[ipt],ycc2[ipt]), \
-            #                 (xcc3[ipt],ycc3[ipt]), (xcc4[ipt],ycc4[ipt])])
-            #normfac = (poly1.area / (cdelt1 * cdelt2)) * (dwave[ipt] / np.median(zcdelt3[indexz]))
+            poly1 = Polygon([(xcc1[ipt],ycc1[ipt]), (xcc2[ipt],ycc2[ipt]), \
+                             (xcc3[ipt],ycc3[ipt]), (xcc4[ipt],ycc4[ipt])])
+            normfac = poly1.area * poly1.area # * dwave[ipt]
+                                      #/ np.median(zcdelt3[indexz]))
             #normfac = poly1.area / (cdelt1 * cdelt2)
             #normfac = poly1.area/avgsize
             #allarea[ipt]=poly1.area
 
-            weight_distance = weight_distance#*normfac
+            weight_distance = weight_distance/normfac
 
             weighted_flux = weight_distance * flux[ipt]#/normfac
             weighted_var = (weight_distance * err[ipt]) * (weight_distance * err[ipt])
@@ -604,7 +609,7 @@ def match_det2cube_oldmsm(naxis1, naxis2, naxis3,
 
             # Add the weighted flux and variance to running 1d cubes, along with the weights
             # (for later normalization), and point count (for information)
-            spaxel_flux[icube_index] = spaxel_flux[icube_index] + weighted_flux
+            spaxel_flux[icube_index] = spaxel_flux[icube_index] + weighted_flux#*normfac
             spaxel_weight[icube_index] = spaxel_weight[icube_index] + weight_distance
             spaxel_iflux[icube_index] = spaxel_iflux[icube_index] + 1
             spaxel_var[icube_index] = spaxel_var[icube_index] + weighted_var
