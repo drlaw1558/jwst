@@ -139,8 +139,6 @@ def match_det2cube_driz(naxis1, naxis2, naxis3,
             for ii in range(0,len(indexz[0])):
                 zoverlap[ii] = max(max((spxmax[ii]-ptmin), 0) - max((spxmax[ii]-ptmax), 0) \
                                   - max((spxmin[ii]-ptmin), 0), 0)
-            # Normalize by pixel z size
-            zoverlap = zoverlap/dwave[ipt]
 
             # What is the fractional spatial overlap?
             aoverlap = np.zeros(len(indexr[0]))
@@ -154,8 +152,6 @@ def match_det2cube_driz(naxis1, naxis2, naxis3,
                                  (xcenters[indexr][ii] + cdelt1/2., ycenters[indexr][ii] - cdelt2/2.)])
                 intersect = poly1.intersection(poly2)
                 aoverlap[ii] = intersect.area
-            # Normalize by pixel area
-            aoverlap = aoverlap/poly1.area
 
             # shape of aoverlap is #indexr or number of overlaps in spatial plane
             # shape of zoverlap is #indexz or number of overlaps in spectral plane
