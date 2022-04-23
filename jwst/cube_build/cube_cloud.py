@@ -311,6 +311,10 @@ def match_det2cube_msm(naxis1, naxis2, naxis3,
             elif weighting_type == 'emsm':
                 weight_distance = np.exp(-wdistance / (scalerad_pixel[ipt] / cdelt1))
 
+            # DRL hack
+            temp1=dxy_matrix.flatten('F')
+            temp2=d3_matrix.flatten('F')
+                
             weight_distance = weight_distance.flatten('F')
             weighted_flux = weight_distance * flux[ipt]
             weighted_var = (weight_distance * err[ipt]) * (weight_distance * err[ipt])
@@ -319,7 +323,9 @@ def match_det2cube_msm(naxis1, naxis2, naxis3,
             icube_index = [iz * nplane + ir for iz in indexz[0] for ir in indexr[0]]
 
             if cube_debug in icube_index:
-                log.info('cube_debug %i %d %d', ipt, flux[ipt], weight_distance[icube_index.index(cube_debug)])
+                #pdb.set_trace()
+                #log.info('cube_debug %i %d %d', ipt, flux[ipt], weight_distance[icube_index.index(cube_debug)])
+                print('cube_debug %i %d %d %d %d', ipt, flux[ipt], temp1[icube_index.index(cube_debug)], temp2[icube_index.index(cube_debug)], weight_distance[icube_index.index(cube_debug)])
 
             # Add the weighted flux and variance to running 1d cubes, along with the weights
             # (for later normalization), and point count (for information)

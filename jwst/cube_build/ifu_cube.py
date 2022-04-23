@@ -1599,6 +1599,16 @@ class IFUCubeData():
                 dec = dec_det[valid_data]
                 wave = lam_det[valid_data]
                 slice_no = slice_det[valid_data]
+
+                # Hack some bogus things in just so NIRSPEC doesn't crash in Emsm
+                dwave = np.diff(wave,prepend=wave[0])
+                ra1 = np.zeros_like(wave)
+                dec1 = ra1.copy()
+                ra2,dec2 = ra1.copy(), ra1.copy()
+                ra3,dec3 = ra1.copy(), ra1.copy()
+                ra4,dec4 = ra1.copy(), ra1.copy()
+            
+                    
 # ______________________________________________________________________________
 # The following is for both MIRI and NIRSPEC
 # grab the flux and DQ values for these pixels
@@ -1652,6 +1662,7 @@ class IFUCubeData():
             err = err_all[good_data]
             wave = wave[good_data]
             slice_no = slice_no[good_data]
+            #pdb.set_trace()
             dwave = dwave[good_data]
 
             # based on the wavelength define the sroi, wroi, weight_power and
@@ -2213,7 +2224,7 @@ class IFUCubeData():
                                             self.naxis2, self.naxis1))
 
         # clean up empty wavelength planes except for single case
-        if self.output_type != 'single':
+        if self.output_type == 'hamster':
             remove_start = 0
             k = 0
             found = 0
