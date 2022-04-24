@@ -1510,26 +1510,47 @@ class IFUCubeData():
                 x = x[valid1]
                 y = y[valid1]
 
-                # Delta wavelengths
-                _,_,wave1 = input_model.meta.wcs(x, y - 0.4999)
-                _,_,wave2 = input_model.meta.wcs(x, y + 0.4999)
-                dwave = np.abs(wave1 - wave2)
-
-                # Pixel corners
+                # This version uses a full tilted-polyhedron model of the pixel
+                # boundaries in RA/DEC/lam space, needing 8 points
                 pixfrac=1.0
-                alpha1,beta,_ = input_model.meta.wcs.transform('detector', 'alpha_beta', x-0.4999*pixfrac, y)
-                alpha2,_,_ = input_model.meta.wcs.transform('detector', 'alpha_beta', x + 0.4999 * pixfrac, y)
+                alpha1,beta,wave1 = input_model.meta.wcs.transform('detector', 'alpha_beta', x+0.4999*pixfrac, y-0.4999*pixfrac)
+                alpha2,_,wave2 = input_model.meta.wcs.transform('detector', 'alpha_beta', x-0.4999*pixfrac, y-0.4999*pixfrac)
+                alpha3,alpha4 = alpha2.copy(), alpha1.copy()
+                wave3,wave4 = wave2.copy(), wave1.copy()
+                alpha5,_,wave5 = input_model.meta.wcs.transform('detector', 'alpha_beta', x+0.4999*pixfrac, y+0.4999*pixfrac)
+                alpha6,_,wave6 = input_model.meta.wcs.transform('detector', 'alpha_beta', x-0.4999*pixfrac, y+0.4999*pixfrac)
+                alpha7,alpha8 = alpha6.copy(),alpha5.copy()
+                wave7,wave8 = wave6.copy(),wave5.copy()
+
                 # Find slice width
                 allbetaval = np.unique(beta)
                 dbeta = np.abs(allbetaval[1] - allbetaval[0])
-                ra1, dec1, _ = input_model.meta.wcs.transform('alpha_beta', 'world', alpha1,
-                                                              beta - dbeta * pixfrac / 2., wave)
-                ra2, dec2, _ = input_model.meta.wcs.transform('alpha_beta', 'world', alpha1,
-                                                              beta + dbeta * pixfrac / 2., wave)
-                ra3, dec3, _ = input_model.meta.wcs.transform('alpha_beta', 'world', alpha2,
-                                                              beta + dbeta * pixfrac / 2., wave)
-                ra4, dec4, _ = input_model.meta.wcs.transform('alpha_beta', 'world', alpha2,
-                                                              beta - dbeta * pixfrac / 2., wave)
+                beta1=beta - dbeta * pixfrac / 2.
+                beta2=beta - dbeta * pixfrac / 2.
+                beta5=beta - dbeta * pixfrac / 2.
+                beta6=beta - dbeta * pixfrac / 2.
+                beta3=beta + dbeta * pixfrac / 2.
+                beta4=beta + dbeta * pixfrac / 2.
+                beta7=beta + dbeta * pixfrac / 2.
+                beta8=beta + dbeta * pixfrac / 2.
+
+                ra1, dec1, _ = input_model.meta.wcs.transform('alpha_beta', 'world', alpha1, beta1, wave1)
+                ra2, dec2, _ = input_model.meta.wcs.transform('alpha_beta', 'world', alpha2, beta2, wave2)
+                ra3, dec3, _ = input_model.meta.wcs.transform('alpha_beta', 'world', alpha3, beta3, wave3)
+                ra4, dec4, _ = input_model.meta.wcs.transform('alpha_beta', 'world', alpha4, beta4, wave4)
+                ra5, dec5, _ = input_model.meta.wcs.transform('alpha_beta', 'world', alpha5, beta5, wave5)
+                ra6, dec6, _ = input_model.meta.wcs.transform('alpha_beta', 'world', alpha6, beta6, wave6)
+                ra7, dec7, _ = input_model.meta.wcs.transform('alpha_beta', 'world', alpha7, beta7, wave7)
+                ra8, dec8, _ = input_model.meta.wcs.transform('alpha_beta', 'world', alpha8, beta8, wave8)
+                
+                # Delta wavelengths use for overlap computation
+                dw15=np.abs(wave5-wave1)
+                dw16=np.abs(wave6-wave1)
+                dw25=np.abs(wave5-wave2)
+                dw26=np.abs(wave6-wave2)
+                dwave = np.maximum(dw15,dw16)
+                dwave = np.maximum(dwave,dw25)
+                dwave = np.maximum(dwave,dw26)
 
                 xind = _toindex(x)
                 yind = _toindex(y)
@@ -1695,12 +1716,31 @@ class IFUCubeData():
             # Corners
             ra1_use = ra1[good_data]
             dec1_use = dec1[good_data]
+            wave1_use = wave1[good_data]
             ra2_use = ra2[good_data]
             dec2_use = dec2[good_data]
+            wave2_use = wave2[good_data]
             ra3_use = ra3[good_data]
             dec3_use = dec3[good_data]
+            wave3_use = wave3[good_data]
             ra4_use = ra4[good_data]
             dec4_use = dec4[good_data]
+            wave4_use = wave4[good_data]
+
+            ra5_use = ra5[good_data]
+            dec5_use = dec5[good_data]
+            wave5_use = wave5[good_data]
+            ra6_use = ra6[good_data]
+            dec6_use = dec6[good_data]
+            wave6_use = wave6[good_data]
+            ra7_use = ra7[good_data]
+            dec7_use = dec7[good_data]
+            wave7_use = wave7[good_data]
+            ra8_use = ra8[good_data]
+            dec8_use = dec8[good_data]
+            wave8_use = wave8[good_data]
+
+            
 
             coord1, coord2 = coord.radec2std(self.crval1,
                                              self.crval2,
@@ -1722,7 +1762,31 @@ class IFUCubeData():
                                              self.crval2,
                                              ra4_use, dec4_use,
                                              self.rot_angle)
-            ccoord = [c1_cc1, c2_cc1, c1_cc2, c2_cc2, c1_cc3, c2_cc3, c1_cc4, c2_cc4]
+            c1_cc5, c2_cc5 = coord.radec2std(self.crval1,
+                                             self.crval2,
+                                             ra5_use, dec5_use,
+                                             self.rot_angle)
+            c1_cc6, c2_cc6 = coord.radec2std(self.crval1,
+                                             self.crval2,
+                                             ra6_use, dec6_use,
+                                             self.rot_angle)
+            c1_cc7, c2_cc7 = coord.radec2std(self.crval1,
+                                             self.crval2,
+                                             ra7_use, dec7_use,
+                                             self.rot_angle)
+            c1_cc8, c2_cc8 = coord.radec2std(self.crval1,
+                                             self.crval2,
+                                             ra8_use, dec8_use,
+                                             self.rot_angle)
+
+            ccoord = [c1_cc1, c2_cc1, wave1_use,
+                      c1_cc2, c2_cc2, wave2_use,
+                      c1_cc3, c2_cc3, wave3_use,
+                      c1_cc4, c2_cc4, wave4_use,
+                      c1_cc5, c2_cc5, wave5_use,
+                      c1_cc6, c2_cc6, wave6_use,
+                      c1_cc7, c2_cc7, wave7_use,
+                      c1_cc8, c2_cc8, wave8_use]
 
             if self.weighting == 'miripsf':
                 alpha_det = alpha[good_data]
