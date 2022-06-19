@@ -119,6 +119,13 @@ class MasterBackgroundStep(Step):
                                 and model.meta.target.source_type == 'EXTENDED'):
                             this_is_ifu_extended = True
 
+                        # DRL hack
+                        for spec in model.spec:
+                            # Temporary hack to deal with DQ not being properly set to DO_NOT_USE
+                            # in regions between the two MRS bands
+                            indx = np.where(spec.spec_table['SURF_BRIGHT'] == 0)
+                            spec.spec_table['DQ'][indx] = 1
+
                         if model.meta.observation.bkgdtarg is False or this_is_ifu_extended:
                             self.log.debug("Copying BACKGROUND column "
                                            "to SURF_BRIGHT")
@@ -224,10 +231,6 @@ def copy_background_to_surf_bright(spectrum):
         spec.spec_table['BACKGROUND'][:] = 0
         # Set BERROR to dummy val of 0.0, as in extract_1d currently
         spec.spec_table['BKGD_ERROR'][:] = 0.
-        # Temporary hack to deal with DQ not being properly set to DO_NOT_USE
-        # in regions between the two MRS bands
-        indx = np.where(spec.spec_table['SURF_BRIGHT'] == 0)
-        spec.spec_table['DQ'][indx] = 1
 
 
 def split_container(container):
