@@ -10,7 +10,6 @@ from .util import wfss_imaging_wcs, wcs_bbox_from_shape
 from .nircam import imaging as nircam_imaging
 from .niriss import imaging as niriss_imaging
 
-
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
 
@@ -51,6 +50,7 @@ class AssignWcsStep(Step):
     class_alias = "assign_wcs"
 
     spec = """
+        mirifu_thresh = integer(default=7) # Throughput threshold for MIRI MRS
         sip_approx = boolean(default=True)  # enables SIP approximation for imaging modes.
         sip_max_pix_error = float(default=0.1)  # max err for SIP fit, forward.
         sip_degree = integer(max=6, default=None)  # degree for forward SIP fit, None to use best fit.
@@ -97,7 +97,7 @@ class AssignWcsStep(Step):
                     log.error(message)
                     raise MSAFileError(message)
             slit_y_range = [self.slit_y_low, self.slit_y_high]
-            result = load_wcs(input_model, reference_file_names, slit_y_range)
+            result = load_wcs(input_model, reference_file_names, slit_y_range, self.mirifu_thresh)
 
         if not (result.meta.exposure.type.lower() in (IMAGING_TYPES.union(WFSS_TYPES)) and self.sip_approx):
             return result

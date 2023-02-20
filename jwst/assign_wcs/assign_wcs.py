@@ -13,7 +13,7 @@ log.setLevel(logging.DEBUG)
 __all__ = ["load_wcs"]
 
 
-def load_wcs(input_model, reference_files={}, nrs_slit_y_range=None):
+def load_wcs(input_model, reference_files={}, nrs_slit_y_range=None, mirifu_thresh=7):
     """
     Create a gWCS object and store it in ``Model.meta``.
 
@@ -26,6 +26,7 @@ def load_wcs(input_model, reference_files={}, nrs_slit_y_range=None):
         reference files that apply to this exposure.
     nrs_slit_y_range : list
         The slit y-range for a Nirspec slit. The center is (0, 0).
+    mirifu_thresh : value
     """
     if reference_files:
         for ref_type, ref_file in reference_files.items():
@@ -52,7 +53,7 @@ def load_wcs(input_model, reference_files={}, nrs_slit_y_range=None):
     if instrument.lower() == 'nirspec':
         pipeline = mod.create_pipeline(input_model, reference_files, slit_y_range=nrs_slit_y_range)
     else:
-        pipeline = mod.create_pipeline(input_model, reference_files)
+        pipeline = mod.create_pipeline(input_model, reference_files, mirifu_thresh=mirifu_thresh)
     # Initialize the output model as a copy of the input
     # Make the copy after the WCS pipeline is created in order to pass updates to the model.
     if pipeline is None:

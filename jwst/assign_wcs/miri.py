@@ -20,7 +20,6 @@ from . import pointing
 from .util import (not_implemented_mode, subarray_transform,
                    velocity_correction, transform_bbox_from_shape, bounding_box_from_subarray)
 
-
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
 
@@ -28,7 +27,7 @@ log.setLevel(logging.DEBUG)
 __all__ = ["create_pipeline", "imaging", "lrs", "ifu"]
 
 
-def create_pipeline(input_model, reference_files):
+def create_pipeline(input_model, reference_files, mirifu_thresh):
     """
     Create the WCS pipeline for MIRI modes.
 
@@ -42,7 +41,7 @@ def create_pipeline(input_model, reference_files):
 
     """
     exp_type = input_model.meta.exposure.type.lower()
-    pipeline = exp_type2transform[exp_type](input_model, reference_files)
+    pipeline = exp_type2transform[exp_type](input_model, reference_files, mirifu_thresh)
     if pipeline:
         log.info("Created a MIRI {0} pipeline with references {1}".format(
             exp_type, reference_files))
@@ -377,7 +376,7 @@ def lrs_distortion(input_model, reference_files):
     return dettotel
 
 
-def ifu(input_model, reference_files):
+def ifu(input_model, reference_files, mirifu_thresh):
     """
     The MIRI MRS WCS pipeline.
 
@@ -408,7 +407,7 @@ def ifu(input_model, reference_files):
     world = cf.CompositeFrame([icrs, spec], name='world')
 
     # Define the actual transforms
-    det2abl = (detector_to_abl(input_model, reference_files)).rename(
+    det2abl = (detector_to_abl(input_model, reference_files, mirifu_thresh)).rename(
         "detector_to_abl")
     abl2v2v3l = (abl_to_v2v3l(input_model, reference_files)).rename("abl_to_v2v3l")
 
@@ -432,7 +431,7 @@ def ifu(input_model, reference_files):
     return pipeline
 
 
-def detector_to_abl(input_model, reference_files):
+def detector_to_abl(input_model, reference_files, mirifu_thresh):
     """
     Create the transform from "detector" to "alpha_beta" frame.
 
@@ -476,8 +475,9 @@ def detector_to_abl(input_model, reference_files):
 
     with RegionsModel(reference_files['regions']) as f:
         allregions = f.regions.copy()
-        # Use the 80% throughput slice mask
-        regions = allregions[7, :, :]
+        # Use the 80% throughput slice mask unless otherwise specified
+        log.info("Using throughput level {}".format(mirifu_thresh))
+        regions = allregions[mirifu_thresh, :, :]
 
     label_mapper = selector.LabelMapperArray(regions)
     transforms = {}
