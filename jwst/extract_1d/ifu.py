@@ -97,10 +97,11 @@ def ifu_extract1d(input_model, ref_dict, source_type, subtract_background,
     # load them into extract_params for use later.
     extract_params['x_center'] = None
     extract_params['y_center'] = None
+
     if center_xy is not None:
         if len(center_xy) == 2:
-            extract_params['x_center'] = int(center_xy[0])
-            extract_params['y_center'] = int(center_xy[1])
+            extract_params['x_center'] = float(center_xy[0])
+            extract_params['y_center'] = float(center_xy[1])
             log.info(f'Using user-supplied x_center={center_xy[0]}, y_center={center_xy[1]}')
         else:
             log.warning('Incorrect number of values in center_xy; should be two.')
@@ -615,7 +616,8 @@ def extract_ifu(input_model, source_type, extract_params):
         if annulus is not None:
             npixels_bkg[k] = annulus_area
         # aperture_photometry - using data
-
+        if (k == 0):
+            print(aperture)
         phot_table = aperture_photometry(data[k, :, :], aperture, mask=bmask,
                                          method=method, subpixels=subpixels)
         temp_flux[k] = float(phot_table['aperture_sum'][0])

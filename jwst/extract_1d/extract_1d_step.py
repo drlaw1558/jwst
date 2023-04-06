@@ -137,7 +137,7 @@ class Extract1dStep(Step):
     log_increment = integer(default=50)  # increment for multi-integration log messages
     subtract_background = boolean(default=None)  # subtract background?
     use_source_posn = boolean(default=None)  # use source coords to center extractions?
-    center_xy = int_list(min=2, max=2, default=None)  # IFU extraction x/y center
+    center_xy = float_list(min=2, max=2, default=None)  # IFU extraction x/y center
     apply_apcorr = boolean(default=True)  # apply aperture corrections?
     soss_atoca = boolean(default=True)  # use ATOCA algorithm
     soss_threshold = float(default=1e-2)  # TODO: threshold could be removed from inputs. Its use is too specific now.
