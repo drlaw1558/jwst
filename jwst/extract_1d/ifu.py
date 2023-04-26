@@ -1,15 +1,15 @@
 import logging
 import numpy as np
 from photutils.aperture import (CircularAperture, CircularAnnulus,
-                                RectangularAperture, aperture_photometry)
+                                RectangularAperture, aperture_photometry, ApertureStats)
 
 from stdatamodels.jwst import datamodels
 from stdatamodels.jwst.datamodels import dqflags
-
+import pdb
 from .apply_apcorr import select_apcorr
 from ..assign_wcs.util import compute_scale
 from astropy import stats
-
+from astropy.io import fits
 from . import spec_wcs
 from scipy.interpolate import interp1d
 
@@ -547,6 +547,11 @@ def extract_ifu(input_model, source_type, extract_params):
         aperture = RectangularAperture(position, width, height, theta)
         annulus = None
 
+    # DRL hack
+    drl_rateinaper=np.zeros(shape[0])
+    bg_rateinaper=np.zeros(shape[0])
+    bg_rmsinaper=np.zeros(shape[0])
+
     for k in range(shape[0]):  # looping over wavelength
         inner_bkg = None
         outer_bkg = None
@@ -639,7 +644,14 @@ def extract_ifu(input_model, source_type, extract_params):
             bkg_table = aperture_photometry(data[k, :, :], annulus, mask=bmask,
                                             method=method, subpixels=subpixels)
             background[k] = float(bkg_table['aperture_sum'][0])
+
             temp_flux[k] = temp_flux[k] - background[k] * normalization
+
+            # DRL hack
+            aperstats = ApertureStats(data[k, :, :], annulus)
+            drl_rateinaper[k] = temp_flux[k]
+            bg_rmsinaper[k] = aperstats.std * np.sqrt(npixels_bkg[k])
+            bg_rateinaper[k] = background[k]*normalization
 
             var_poisson_table = aperture_photometry(var_poisson[k, :, :], annulus, mask=bmask,
                                                     method=method, subpixels=subpixels)
@@ -693,6 +705,15 @@ def extract_ifu(input_model, source_type, extract_params):
                 b_var_flat[k] = float(var_flat_table['aperture_sum'][0])
 
         del temp_weightmap
+
+    # DRL hack
+    hdu0 = fits.PrimaryHDU(npixels)
+    hdu1 = fits.ImageHDU(drl_rateinaper)
+    hdu2 = fits.ImageHDU(bg_rateinaper)
+    hdu3 = fits.ImageHDU(bg_rmsinaper)
+    hdu = fits.HDUList([hdu0, hdu1, hdu2, hdu3])
+    #hdu.writeto('testbg.fits', overwrite=True)
+
         # done looping over wavelength bins
     # Check for NaNs in the wavelength array, flag them in the dq array,
     # and truncate the arrays if NaNs are found at endpoints (unless the
