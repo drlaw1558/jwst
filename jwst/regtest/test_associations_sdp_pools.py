@@ -32,6 +32,11 @@ SPECIAL_DEFAULT = {
     'slow': False,
 }
 SPECIAL_POOLS = {
+    'jw00016_20230331t130733_pool': {
+        'args': [],
+        'xfail': 'See issue JP-3230',
+        'slow': False,
+    },
     'jw00623_20190607t021101_pool': {
         'args': [],
         'xfail': None,
@@ -77,9 +82,19 @@ SPECIAL_POOLS = {
         'xfail': None,
         'slow': False,
     },
+    'jw01194_20230115t113819_pool': {
+        'args': [],
+        'xfail': None,
+        'slow': True,
+    },
     'jw01257_20221201t192226_pool': {
         'args': [],
         'xfail': None,
+        'slow': True,
+    },
+    'jw01288_c1005_mostilno12_pool': {
+        'args': ['-i', 'o003', 'c1001', 'c1005'],
+        'xfail': 'See issue JP-3230',
         'slow': True,
     },
     'jw01290_20230304t140931_pool': {

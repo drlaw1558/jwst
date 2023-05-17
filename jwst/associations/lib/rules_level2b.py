@@ -13,6 +13,7 @@ from jwst.associations.lib.dms_base import (
     Constraint_WFSC,
     format_list,
     item_getattr,
+    nrccoron_valid_detector,
     nrsfss_valid_detector,
     nrsifu_valid_detector,
     nrslamp_valid_detector,
@@ -24,6 +25,7 @@ from jwst.associations.lib.rules_level2_base import *
 from jwst.associations.lib.rules_level3_base import DMS_Level3_Base
 
 __all__ = [
+    'Asn_Lv2CoronAsRate',
     'Asn_Lv2FGS',
     'Asn_Lv2Image',
     'Asn_Lv2ImageNonScience',
@@ -32,9 +34,11 @@ __all__ = [
     'Asn_Lv2MIRLRSFixedSlitNod',
     'Asn_Lv2NRSFSS',
     'Asn_Lv2NRSIFUNod',
+    'Asn_Lv2NRSLAMPImage',
     'Asn_Lv2NRSLAMPSpectral',
     'Asn_Lv2NRSMSA',
     'Asn_Lv2Spec',
+    'Asn_Lv2SpecImprint',
     'Asn_Lv2SpecSpecial',
     'Asn_Lv2SpecTSO',
     'Asn_Lv2WFSSNIS',
@@ -51,6 +55,57 @@ logger.addHandler(logging.NullHandler())
 # Start of the User-level rules
 # --------------------------------
 @RegistryMarker.rule
+class Asn_Lv2CoronAsRate(AsnMixin_Lv2Image, DMSLevel2bBase):
+    """Create normal rate products for some coronographic data
+
+    Characteristics;
+        - Association type: ``image2``
+        - Pipeline: ``calwebb_image2``
+        - NIRCam Coronagraphic
+        - Only subarray=Full exposures
+        - Treat as non-timeseries, producing "rate" products
+    """
+    def __init__(self, *args, **kwargs):
+
+        # Setup constraints
+        self.constraints = Constraint([
+            Constraint_Base(),
+            Constraint_Mode(),
+            DMSAttrConstraint(
+                name='exp_type',
+                sources=['exp_type'],
+                value='nrc_coron',
+            ),
+            DMSAttrConstraint(
+                name='subarray',
+                sources=['subarray'],
+                value='full',
+            ),
+            SimpleConstraint(
+                value=True,
+                sources=nrccoron_valid_detector,
+            ),
+            Constraint(
+                [
+                    Constraint_Background(),
+                    Constraint_Single_Science(self.has_science, self.get_exposure_type),
+                ], reduce=Constraint.any
+            ),
+        ])
+
+        # Now check and continue initialization.
+        super().__init__(*args, **kwargs)
+
+    def is_item_coron(self, item):
+        """Override to always return false
+
+        The override will force `make_member` to create a "rate"
+        product instead of a "rateints" product.
+        """
+        return False
+
+
+@RegistryMarker.rule
 class Asn_Lv2Image(
         AsnMixin_Lv2Image,
         DMSLevel2bBase
@@ -63,6 +118,7 @@ class Asn_Lv2Image(
         - Image-based science exposures
         - Single science exposure
         - Non-TSO
+        - Non-coronagraphic
     """
 
     def __init__(self, *args, **kwargs):
@@ -73,13 +129,15 @@ class Asn_Lv2Image(
             Constraint_Mode(),
             Constraint_Image_Science(),
             Constraint(
-                [Constraint_TSO()],
+                [
+                    Constraint_TSO(),
+                ],
                 reduce=Constraint.notany
             ),
             Constraint(
                 [
-                    Constraint_Background(self),
-                    Constraint_Single_Science(self.has_science),
+                    Constraint_Background(),
+                    Constraint_Single_Science(self.has_science, self.get_exposure_type),
                 ], reduce=Constraint.any
             ),
         ])
@@ -109,7 +167,7 @@ class Asn_Lv2ImageNonScience(
         self.constraints = Constraint([
             Constraint_Base(),
             Constraint_Image_Nonscience(),
-            Constraint_Single_Science(self.has_science),
+            Constraint_Single_Science(self.has_science, self.get_exposure_type),
         ])
 
         # Now check and continue initialization.
@@ -139,7 +197,7 @@ class Asn_Lv2ImageSpecial(
             Constraint_Base(),
             Constraint_Mode(),
             Constraint_Image_Science(),
-            Constraint_Single_Science(self.has_science),
+            Constraint_Single_Science(self.has_science, self.get_exposure_type),
             Constraint_Special(),
         ])
 
@@ -168,7 +226,7 @@ class Asn_Lv2ImageTSO(
             Constraint_Base(),
             Constraint_Mode(),
             Constraint_Image_Science(),
-            Constraint_Single_Science(self.has_science),
+            Constraint_Single_Science(self.has_science, self.get_exposure_type),
             Constraint_TSO(),
         ])
 
@@ -201,7 +259,7 @@ class Asn_Lv2FGS(
         # Setup constraints
         self.constraints = Constraint([
             Constraint_Base(),
-            Constraint_Single_Science(self.has_science),
+            Constraint_Single_Science(self.has_science, self.get_exposure_type),
             DMSAttrConstraint(
                 name='exp_type',
                 sources=['exp_type'],
@@ -246,14 +304,9 @@ class Asn_Lv2Spec(
             ),
             Constraint(
                 [
-                    Constraint_Background(self),
+                    Constraint_Background(),
                     Constraint_Imprint(),
-                    SimpleConstraint(
-                        value='science',
-                        test=lambda value, item: self.get_exposure_type(item) != value,
-                        force_unique=False,
-                    ),
-                    Constraint_Single_Science(self.has_science),
+                    Constraint_Single_Science(self.has_science, self.get_exposure_type),
                 ],
                 reduce=Constraint.any
             ),
@@ -296,7 +349,7 @@ class Asn_Lv2SpecImprint(
             Constraint_Base(),
             Constraint_Mode(),
             Constraint_Spectral_Science(),
-            Constraint_Single_Science(self.has_science),
+            Constraint_Single_Science(self.has_science, self.get_exposure_type),
             DMSAttrConstraint(
                 name='imprint',
                 sources=['is_imprt']
@@ -333,7 +386,7 @@ class Asn_Lv2SpecSpecial(
             Constraint(
                 [
                     Constraint_Imprint_Special(self),
-                    Constraint_Single_Science(self.has_science),
+                    Constraint_Single_Science(self.has_science, self.get_exposure_type),
                 ],
                 reduce=Constraint.any
             ),
@@ -367,7 +420,7 @@ class Asn_Lv2SpecTSO(
             Constraint_Spectral_Science(
                 exclude_exp_types=['nrs_msaspec', 'nrs_fixedslit']
             ),
-            Constraint_Single_Science(self.has_science),
+            Constraint_Single_Science(self.has_science, self.get_exposure_type),
             Constraint_TSO(),
             Constraint(
                 [
@@ -443,7 +496,7 @@ class Asn_Lv2MIRLRSFixedSlitNod(
                                 sources=['patt_num'],
                             ),
                             Constraint_Single_Science(
-                                self.has_science,
+                                self.has_science, self.get_exposure_type,
                                 reprocess_on_match=True,
                                 work_over=ListCategory.EXISTING
                             )
@@ -508,7 +561,7 @@ class Asn_Lv2NRSLAMPImage(
         # Setup constraints
         self.constraints = Constraint([
             Constraint_Base(),
-            Constraint_Single_Science(self.has_science),
+            Constraint_Single_Science(self.has_science, self.get_exposure_type),
             DMSAttrConstraint(
                 name='exp_type',
                 sources=['exp_type'],
@@ -546,7 +599,7 @@ class Asn_Lv2NRSLAMPSpectral(
 
         self.constraints = Constraint([
             Constraint_Base(),
-            Constraint_Single_Science(self.has_science),
+            Constraint_Single_Science(self.has_science, self.get_exposure_type),
             DMSAttrConstraint(
                 name='exp_type',
                 sources=['exp_type'],
@@ -669,7 +722,7 @@ class Asn_Lv2WFSSNIS(
                     test=lambda value, item: self.get_exposure_type(item) != value,
                     force_unique=False,
                     ),
-                Constraint_Single_Science(self.has_science),
+                Constraint_Single_Science(self.has_science, self.get_exposure_type),
             ], reduce=Constraint.any)
         ])
 
@@ -724,7 +777,7 @@ class Asn_Lv2WFSSNRC(
                     test=lambda value, item: self.get_exposure_type(item) != value,
                     force_unique=False,
                     ),
-                Constraint_Single_Science(self.has_science),
+                Constraint_Single_Science(self.has_science, self.get_exposure_type),
             ], reduce=Constraint.any)
         ])
 
@@ -918,7 +971,7 @@ class Asn_Lv2WFSC(
         self.constraints = Constraint([
             Constraint_Base(),
             Constraint_Image_Science(),
-            Constraint_Single_Science(self.has_science),
+            Constraint_Single_Science(self.has_science, self.get_exposure_type),
             Constraint_WFSC(),
             Constraint(
                 [

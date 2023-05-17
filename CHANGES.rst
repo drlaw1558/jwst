@@ -1,15 +1,205 @@
-1.9.7 (unreleased)
-==================
+1.10.3 (unreleased)
+===================
+
+associations
+------------
+
+- Updated level-2b and level-3 rules to properly handle NIRCam Coronagraphy
+  observations that use all 4 short-wave detectors. Only treat the one detector that
+  contains the target as coron, while treating the others as regular imaging. Also
+  create an image3 ASN that contains data from all 4 detectors. [#7556]
+
+background
+----------
+
+- Mask out NaN pixels before removing outlier values and calculating mean in
+  ``robust_mean`` function. [#7587]
+
+datamodels
+----------
+
+- Removed use of deprecated ``stdatamodels.jwst.datamodels.DataModel`` class from
+  all steps and replaced it with ``stdatamodels.jwst.datamodels.JwstDataModel``. [#7571]
+
+
+documentation
+-------------
+
+- Fix bugs in implementation of ``pixel_replace`` documentation. [#7565]
+
+- Update tutorial usage of ``jump.threshold`` to ``jump.rejection_threshold``. [#7572]
+
+extract_1d
+----------
+
+- Changed the logic for handling NIRSpec IFU data, so that both point and extended sources
+  are treated the same, i.e. assume the inputs are in units of surface brightness for all
+  sources and convert extracted values to flux density. [#7569]
+
+flat_field
+----------
+
+- Refactored NIRSpec 1D flat interpolation for improved performance. [#7550]
+
+cube_build
+----------
+
+- Updated to read wavelength range for NIRSpec IFU cubes from the cubepars reference file,
+  instead of setting it based on the data. This makes use of new NIRSpec IFU cubepars reference
+  files with wavelength arrays for the drizzle method. [#7559]
+
+other
+-----
+
+- Remove the use of ``stdatamodels.s3_utils`` from ``jwst``, and the ``aws`` install
+  option. [#7542]
+
+- Drop support for Python 3.8 [#7552]
+
+- Override package dependencies with requirements file when requested [#7557]
+
+pathloss
+--------
+
+- Bug fix for NIRSpec fixed-slit data to remove double application of correction
+  factors. [#7566]
+
+photom
+------
+
+- Updated to convert NIRSpec IFU point source data to units of surface brightness,
+  for compatibility with the ``cube_build`` step. [#7569]
+
+pixel_replace
+-------------
+
+- Add ``pixel_replace`` step to ``Spec2Pipeline``, which uses a weighted interpolation
+  to estimate flux values for pixels flagged as ``DO_NOT_USE``. [#7398]
+
+ramp_fitting
+------------
+
+- Updated CI tests due to a change in STCAL, which fixed a bug in the way the number
+  of groups in a segment are computed when applying optimal weighting to line
+  fit segments. [#7560, spacetelescope/stcal#163]
+
+srctype
+-------
+
+- The SRCTYAPT takes precedence over PATTTYPE when setting the source type for
+  MIR_LRS-FIXEDSLIT, MIR_LRS-SLITLESS, 'MIR_MRS', NRC_TSGRISM, NRS_FIXEDSLIT, NRS_BRIGHTOBJ, NRS_IFU. [#7583]
+  
+tweakreg
+--------
+
+- Fixed a bug in the ``tweakreg`` step that resulted in an exception when
+  using custom catalogs with ASN file name input. [#7578]
+
+
+1.10.2 (2023-04-14)
+===================
+
+- pinned `stdatamodels`, `stcal`, and `stpipe` below API-breaking changes [#7555]
+
+
+1.10.1 (2023-04-13)
+===================
+
+documentation
+-------------
+
+- Corrected information about the application of the ``srctype`` step to WFSS exposures.
+  [#7536]
+
+extract_1d
+----------
+
+- Update to be skipped for NIRSpec fixed slit modes with rateints input, because
+  that mode is not allowed. [#7516]
+
+flat_field
+----------
+
+- Updated to allow processing of NIRSpec fixed-slit 3D (rateints) files. [#7516]
+
+jump
+----
+
+- Added a new parameter that limits maximum size of extension of jump. It exists
+  in the STCAL jump code but not in JWST. This allows the parameter to be changed.
+  Also, scaled two input parameters that are listed as radius to be a factor of two
+  higher to match the opencv code that uses diameter. [#7545]
+
+other
+-----
+
+- Remove use of deprecated ``pytest-openfiles`` plugin. This has been replaced by
+  catching ``ResourceWarning``s. [#7526]
+
+- Remove use of ``codecov`` package. [#7543]
+
+photom
+------
+
+- Label spectral data units for NIRISS SOSS as MJy, to be consistent with
+  ``PHOTMJ`` scalar conversion factor and other point-source spectral data [#7538]
+
+resample_spec
+-------------
+
+- Update ``resample_spec`` to be skipped for NIRSpec fixed slit MultiSlitModel
+  rateints input, because that mode is not allowed. [#7516]
+
+
+1.10.0 (2023-04-03)
+===================
 
 assign_wcs
 ----------
 
-- Fix ``WCS.bounding_box`` computation for MIRI MRS TSO observations. [#7492]
+- Fix ``WCS.bounding_box`` computation for MIRI MRS TSO observations so that it
+  properly accounts for the 3D shape of the data. [#7492]
+
+associations
+------------
+
+- Remove extra reprocessing of existing associations. [#7506]
+
+- Treat PSF exposures as science for Level 2 association processing, so that they
+  too get linked background exposures associated with them, just like science
+  target exposures. [#7508]
+
+calwebb_detector1
+-----------------
+
+- Added the call to the undersampling_correction step to the ``calwebb_detector1``
+  pipeline. [#7501]
+
+- Added regression test for ``calwebb_detector1`` pipeline to include the new
+  ``undersampling_correction`` step. [#7509]
+
+cube_build
+----------
+
+- Windows: MSVC: Allocate ``wave_slice_dq`` array using ``mem_alloc_dq()`` [#7491]
+
+- Memory improvements, do not allow MIRI and 'internal_cal', and allow user to
+  set suffix for the output. [#7521]
 
 datamodels
 ----------
 
 - Move ``jwst.datamodels`` out of ``jwst`` into ``stdatamodels.jwst.datamodels``. [#7439]
+
+documentation
+-------------
+
+- Fixed minor errors in the docs for EngDB, outlier_detection, and ramp fitting. [#7500]
+
+- Update documentation for ``calwebb_detector1`` to include the undersampling_correction
+  step. [#7510]
+
+- Clarify ``jump`` arguments documentation, and correct typos. [#7518]
 
 dq_init
 -------
@@ -24,6 +214,23 @@ extract_1d
   precedence is given for command line override, reference file settings, and
   internal decisions of the appropriate setting (in that order). [#7466]
 
+- Edit surface brightness unit strings so that they can be properly parsed
+  by ``astropy.units`` [#7511]
+
+jump
+----
+
+- This has the changes in the JWST repo that allow new parameters to be passed to
+  the STCAL code that made the following changes:
+  Updated the code for both NIR Snowballs and MIRI Showers. The snowball
+  flagging will now extend the saturated core of snowballs. Also,
+  circles are no longer used for snowballs preventing the huge circles
+  of flagged pixels from a glancing CR. Finally snowball flagging now has more stringent tests
+  to prevent incorrect indentification of snowballs.
+  Shower code is completely new and is now able to find extended
+  emission far below the single pixel SNR. It also allows detected
+  showers to flag groups after the detection. [#7478]
+
 other
 -----
 
@@ -31,23 +238,24 @@ other
   instead of ``pkg_resources``. [#7457]
 
 - Switch ``stcal.dqflags`` imports to ``stdatamodels.dqflags``. [#7475]
+
 - Fix failing ``check-security`` job in CI. [#7496]
 
-- Fix memory leaks in packages that use C code: ``cube_build``,
-  ``wfss_contam``, and ``straylight``. [#7493]
+- Fix memory leaks in packages that use C code: ``cube_build``, ``wfss_contam``,
+  and ``straylight``. [#7493]
 
 - add `opencv-python` to hard dependencies for usage of snowball detection in the jump step in `stcal` [#7499]
 
 outlier_detection
 -----------------
 
-- Update the documentation describing the algorithm and the parameters
+- Update the documentation to give more details on the algorithm and the parameters
   used for controlling the step.  [#7481]
 
 pathloss
 --------
 
-- Repeat pathloss correction array into cube, to apply step to
+- Update to apply the correction array to all integrations when given a 3D
   rateints input for MIRI LRS fixed slit data [#7446]
 
 photom
@@ -80,7 +288,6 @@ ramp_fitting
 - Update ramp fitting to calculate separate readnoise variance for processing
   ``undersampling_correction`` output [#7484]
 
-
 resample
 --------
 
@@ -90,37 +297,36 @@ resample
   a bug due to which parts of input images may not be present in the output
   resampled image under certain circumstances. [#7460]
 
+- Carry through good bits correctly for the variance array [#7515]
+
 residual_fringe
 ---------------
 
-- Fix bug in Residual Fringe step handling of NaNs in input [#7471]
+- Updated to provide proper handling of NaNs in input [#7471]
 
 scripts
 -------
 
 - Added a script ``adjust_wcs.py`` to apply additional user-provided rotations
   and scale corrections to an imaging WCS of a calibrated image. [#7430]
+
+- Update ``minimum_deps`` script to use ``importlib_metadata`` and ``packaging``
+  instead of ``pkg_resources``. [#7457]
+
+- Offload ``minimum_deps`` script to ``minimum_dependencies`` package [#7463]
 
 set_telescope_pointing
 ----------------------
 
 - Correct WCS determination for aperture MIRIM_TAMRS [#7449]
 
+- Fill values of ``TARG_RA`` and ``TARG_DEC`` with ``RA_REF`` and ``DEC_REF``
+  if target location is not provided, e.g. for pure parallel observations [#7512]
+
 straylight
 ----------
 
-- Fix bug with straylight zeroing out NaNs in input rate images, as these
-  are now deliberately set as such [#7455]
-- Move ``jwst.datamodels`` out of ``jwst`` into ``stdatamodels.jwst.datamodels``. [#7439]
-
-scripts
--------
-
-- Added a script ``adjust_wcs.py`` to apply additional user-provided rotations
-  and scale corrections to an imaging WCS of a calibrated image. [#7430]
-- Update ``minimum_deps`` script to use ``importlib_metadata`` and ``packaging``
-  instead of ``pkg_resources``. [#7457]
-- Offload ``minimum_deps`` script to ``minimum_dependencies`` package [#7463]
+- Updated to provide proper handling of NaNs in the input images. [#7455]
 
 transforms
 ----------
@@ -140,10 +346,18 @@ tweakreg
 - Fixed a bug due to which alignment may be aborted due to corrections
   being "too large" yet compatible with step parameters. [#7494]
 
+- Added a trap for failures in source catalog construction, which now returns
+  an empty catalog for the image on which the error occurred. [#7507]
+
+- Fixed a crash occuring when alignment of a single image to an absolute
+  astrometric catalog (e.g. Gaia) fails due to not enough sources in the
+  catalog. [#7513]
+
 undersampling_correction
 ------------------------
 
 - New step between jump and ramp_fitting in the ``Detector1Pipeline``. [#7479]
+
 
 1.9.6 (2023-03-09)
 ==================
