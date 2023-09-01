@@ -53,6 +53,7 @@ def load_wcs(input_model, reference_files={}, nrs_slit_y_range=None, mirifu_thre
     if instrument.lower() == 'nirspec':
         pipeline = mod.create_pipeline(input_model, reference_files, slit_y_range=nrs_slit_y_range)
     else:
+        print('mirifu thresh: ',mirifu_thresh)
         pipeline = mod.create_pipeline(input_model, reference_files, mirifu_thresh=mirifu_thresh)
     # Initialize the output model as a copy of the input
     # Make the copy after the WCS pipeline is created in order to pass updates to the model.
