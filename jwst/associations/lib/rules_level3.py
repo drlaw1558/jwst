@@ -8,7 +8,7 @@ from jwst.associations.lib.dms_base import (nrccoron_valid_detector)
 from jwst.associations.lib.process_list import ListCategory
 from jwst.associations.lib.rules_level3_base import *
 from jwst.associations.lib.rules_level3_base import (
-    dms_product_name_sources, dms_product_name_noopt,
+    dms_product_name_sources, dms_product_name_nrsfs_sources, dms_product_name_noopt, dms_product_name_coronimage,
     format_product
 )
 
@@ -474,6 +474,10 @@ class Asn_Lv3NRCCoronImage(AsnMixin_Science):
         # Check and continue initialization.
         super(Asn_Lv3NRCCoronImage, self).__init__(*args, **kwargs)
 
+    @property
+    def dms_product_name(self):
+        return dms_product_name_coronimage(self)
+
     def _init_hook(self, item):
         """Post-check and pre-add initialization"""
 
@@ -535,7 +539,7 @@ class Asn_Lv3NRSFSS(AsnMixin_Spectrum):
 
     @property
     def dms_product_name(self):
-        return dms_product_name_sources(self)
+        return dms_product_name_nrsfs_sources(self)
 
 
 @RegistryMarker.rule
@@ -902,6 +906,14 @@ class Asn_Lv3TSO(AsnMixin_Science):
             )
         ])
 
+        # Only valid if candidate type is 'observation'.
+        self.validity.update({
+            'is_type_observation': {
+                'validated': False,
+                'check': self._validate_candidates
+            }
+        })
+
         super(Asn_Lv3TSO, self).__init__(*args, **kwargs)
 
     def _init_hook(self, item):
@@ -909,6 +921,26 @@ class Asn_Lv3TSO(AsnMixin_Science):
 
         self.data['asn_type'] = 'tso3'
         super(Asn_Lv3TSO, self)._init_hook(item)
+
+    def _validate_candidates(self, member):
+        """Allow only observation-type candidates
+
+        Parameters
+        ----------
+        member : Member
+            Member being added. Ignored.
+
+        Returns
+        -------
+        True if candidate type is observation.
+        False otherwise.
+        """
+
+        # If a group candidate, reject.
+        if self.acid.type.lower() != 'observation':
+            return False
+
+        return True
 
 
 @RegistryMarker.rule

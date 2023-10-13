@@ -28,7 +28,7 @@ class PixelReplaceStep(Step):
     class_alias = "pixel_replace"
 
     spec = """
-        algorithm = option("fit_profile", "N/A", default="fit_profile") 
+        algorithm = option("fit_profile", "mingrad", "N/A", default="fit_profile") 
         n_adjacent_cols = integer(default=3)    # Number of adjacent columns to use in creation of profile
         skip = boolean(default=True) # Step must be turned on by parameter reference or user
     """
@@ -84,6 +84,6 @@ class PixelReplaceStep(Step):
             replacement = PixelReplacement(result, **pars)
             replacement.replace()
 
-            self.record_step_status(result, 'pixel_replace', success=True)
+            self.record_step_status(replacement.output, 'pixel_replace', success=True)
             return replacement.output
 

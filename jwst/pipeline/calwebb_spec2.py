@@ -91,7 +91,7 @@ class Spec2Pipeline(Pipeline):
 
         Parameters
         ----------
-        input: str, Level2 Association, or ~jwst.datamodels.DataModel
+        input: str, Level2 Association, or ~jwst.datamodels.JwstDataModel
             The exposure or association of exposures to process
         """
         self.log.info('Starting calwebb_spec2 ...')
@@ -276,9 +276,6 @@ class Spec2Pipeline(Pipeline):
         calibrated.meta.asn.table_name = op.basename(asn_file)
         calibrated.meta.filename = self.make_output_path(suffix=suffix)
 
-        # Replace bad pixels before rectification
-        calibrated = self.pixel_replace(calibrated)
-
         # Produce a resampled product, either via resample_spec for
         # "regular" spectra or cube_build for IFU data. No resampled
         # product is produced for time-series modes.
@@ -453,7 +450,7 @@ class Spec2Pipeline(Pipeline):
                 # Compute the simple mean of the gain image, excluding reference pixels.
                 # The gain ref file doesn't have a DQ array that can be used to
                 # mask bad values, so manually exclude NaN's and gain <= 0.
-                gain_image[gain_image <= 0.] = np.NaN
+                gain_image[gain_image <= 0.] = np.nan
                 mean_gain = np.nanmean(gain_image[4:-4, 4:-4])
                 self.log.info('mean gain = %s', mean_gain)
 
@@ -480,6 +477,7 @@ class Spec2Pipeline(Pipeline):
         calibrated = self.barshadow(calibrated)
         calibrated = self.wfss_contam(calibrated)
         calibrated = self.photom(calibrated)
+        calibrated = self.pixel_replace(calibrated)
 
         return calibrated
 
@@ -497,6 +495,7 @@ class Spec2Pipeline(Pipeline):
         calibrated = self.pathloss(calibrated)
         calibrated = self.barshadow(calibrated)
         calibrated = self.photom(calibrated)
+        calibrated = self.pixel_replace(calibrated)
 
         return calibrated
 
@@ -512,6 +511,7 @@ class Spec2Pipeline(Pipeline):
         calibrated = self.fringe(calibrated)
         calibrated = self.pathloss(calibrated)
         calibrated = self.barshadow(calibrated)
+        calibrated = self.pixel_replace(calibrated)
 
         return calibrated
 
@@ -525,5 +525,6 @@ class Spec2Pipeline(Pipeline):
         calibrated = self.barshadow(calibrated)
         calibrated = self.photom(calibrated)
         calibrated = self.residual_fringe(calibrated)  # only run on MIRI_MRS data
+        calibrated = self.pixel_replace(calibrated)
 
         return calibrated
