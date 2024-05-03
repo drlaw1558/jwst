@@ -35,7 +35,7 @@ asn_memberdict = {
 
 
 @pytest.fixture(scope="module", params=file_roots)  # ids=ids)
-def run_pipeline(jail, rtdata_module, request):
+def run_pipeline(rtdata_module, request):
     """Run the calwebb_spec2 pipeline on NIRSpec Fixed-Slit exposures.
        We currently test the following types of inputs:
          1) Full-frame exposure (all slits will be extracted)
@@ -52,6 +52,8 @@ def run_pipeline(jail, rtdata_module, request):
     # Run the calwebb_spec2 pipeline; save results from intermediate steps
     args = ["calwebb_spec2", rtdata.input,
             "--steps.assign_wcs.save_results=true",
+            "--steps.nsclean.skip=False",
+            "--steps.nsclean.save_results=true",
             "--steps.extract_2d.save_results=true",
             "--steps.wavecorr.save_results=true",
             "--steps.srctype.save_results=true",
@@ -64,7 +66,7 @@ def run_pipeline(jail, rtdata_module, request):
 
 @pytest.mark.bigdata
 @pytest.mark.parametrize("suffix", [
-    "assign_wcs", "extract_2d", "wavecorr", "flat_field", "pathloss", "srctype",
+    "assign_wcs", "nsclean", "extract_2d", "wavecorr", "flat_field", "pathloss", "srctype",
     "cal", "s2d", "x1d"])
 def test_nirspec_fs_spec2(run_pipeline, fitsdiff_default_kwargs, suffix):
     """Regression test of the calwebb_spec2 pipeline on a

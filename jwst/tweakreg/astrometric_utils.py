@@ -27,6 +27,9 @@ Primary function for creating an astrometric reference catalog.
 """
 
 
+__all__ = ["TIMEOUT", "compute_radius", "create_astrometric_catalog", "get_catalog"]
+
+
 def create_astrometric_catalog(input_models, catalog="GAIADR3", output="ref_cat.ecsv",
                                gaia_only=False, table_format="ascii.ecsv",
                                existing_wcs=None, num_sources=None, epoch=None):
@@ -93,8 +96,10 @@ def create_astrometric_catalog(input_models, catalog="GAIADR3", output="ref_cat.
         else Time(input_models[0].meta.observation.date).decimalyear
     )
     ref_dict = get_catalog(fiducial[0], fiducial[1], epoch=epoch, sr=radius, catalog=catalog)
+    if len(ref_dict) == 0:
+        return ref_dict
+    
     colnames = ('ra', 'dec', 'mag', 'objID', 'epoch')
-
     ref_table = ref_dict[colnames]
 
     # Add catalog name as meta data

@@ -48,7 +48,7 @@ class GWCSDrizzle:
         kernel : str, optional
             The name of the kernel used to combine the inputs. The choice of
             kernel controls the distribution of flux over the kernel. The kernel
-            names are: "square", "gaussian", "point", "tophat", "turbo", "lanczos2",
+            names are: "square", "gaussian", "point", "turbo", "lanczos2",
             and "lanczos3". The square kernel is the default.
 
         fillval : str, optional
@@ -61,8 +61,6 @@ class GWCSDrizzle:
         self.outsci = None
         self.outwht = None
         self.outcon = None
-
-        self.outexptime = 0.0
         self.uniqid = 0
 
         if wt_scl is None:
@@ -79,7 +77,7 @@ class GWCSDrizzle:
 
         out_units = "cps"
 
-        self.outexptime = product.meta.resample.product_exposure_time or 0.0
+        self.outexptime = product.meta.exposure.measurement_time or 0.0
 
         self.outsci = product.data
         if outwcs:
@@ -120,7 +118,7 @@ class GWCSDrizzle:
         self._product.con = value
 
     def add_image(self, insci, inwcs, inwht=None, xmin=0, xmax=0, ymin=0, ymax=0,
-                  expin=1.0, in_units="cps", wt_scl=1.0):
+                  expin=1.0, in_units="cps", wt_scl=1.0, iscale=1.0):
         """
         Combine an input image with the output drizzled image.
 
@@ -185,6 +183,11 @@ class GWCSDrizzle:
             initialized with wt_scl set to "exptime" or "expsq", the exposure time
             will be used to set the weight scaling and the value of this parameter
             will be ignored.
+
+        iscale : float, optional
+            A scale factor to be applied to pixel intensities of the
+            input image before resampling.
+
         """
         if self.wt_scl == "exptime":
             wt_scl = expin
@@ -197,7 +200,8 @@ class GWCSDrizzle:
         dodrizzle(insci, inwcs, inwht, self.outwcs, self.outsci, self.outwht,
                   self.outcon, expin, in_units, wt_scl, uniqid=self.uniqid,
                   xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax,
-                  pixfrac=self.pixfrac, kernel=self.kernel, fillval=self.fillval)
+                  iscale=iscale, pixfrac=self.pixfrac, kernel=self.kernel,
+                  fillval=self.fillval)
 
     def increment_id(self):
         """
@@ -227,7 +231,7 @@ class GWCSDrizzle:
 
 def dodrizzle(insci, input_wcs, inwht, output_wcs, outsci, outwht, outcon,
               expin, in_units, wt_scl, uniqid=1, xmin=0, xmax=0, ymin=0, ymax=0,
-              pixfrac=1.0, kernel='square', fillval="INDEF"):
+              iscale=1.0, pixfrac=1.0, kernel='square', fillval="INDEF"):
     """
     Low level routine for performing 'drizzle' operation on one image.
 
@@ -303,6 +307,10 @@ def dodrizzle(insci, input_wcs, inwht, output_wcs, outsci, outwht, outcon,
         no maximum will be set in the y dimension (all pixels in a column
         of the input image will be resampled).
 
+    iscale : float, optional
+        A scale factor to be applied to pixel intensities of the
+        input image before resampling.
+
     pixfrac : float, optional
         The fraction of a pixel that the pixel flux is confined to. The
         default value of 1 has the pixel flux evenly spread across the image.
@@ -313,7 +321,7 @@ def dodrizzle(insci, input_wcs, inwht, output_wcs, outsci, outwht, outcon,
     kernel: str, optional
         The name of the kernel used to combine the input. The choice of
         kernel controls the distribution of flux over the kernel. The kernel
-        names are: "square", "gaussian", "point", "tophat", "turbo", "lanczos2",
+        names are: "square", "gaussian", "point", "turbo", "lanczos2",
         and "lanczos3". The square kernel is the default.
 
     fillval: str, optional
@@ -389,6 +397,7 @@ def dodrizzle(insci, input_wcs, inwht, output_wcs, outsci, outwht, outcon,
         uniqid=uniqid,
         xmin=xmin, xmax=xmax,
         ymin=ymin, ymax=ymax,
+        scale=iscale,
         pixfrac=pixfrac,
         kernel=kernel,
         in_units=in_units,

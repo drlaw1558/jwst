@@ -398,11 +398,9 @@ class Extract1dStep(Step):
                 if input_model.meta.instrument.filter == 'CLEAR':
                     self.log.info('Exposure is through the GR700XD + CLEAR (science).')
                     soss_filter = 'CLEAR'
-                elif input_model.meta.instrument.filter == 'F277W':
-                    self.log.info('Exposure is through the GR700XD + F277W (calibration).')
-                    soss_filter = 'F277W'
                 else:
-                    self.log.error('The SOSS extraction is implemented for the CLEAR or F277W filters only.')
+                    self.log.error('The SOSS extraction is implemented for the CLEAR filter only.'
+                                   f'Requested filter is {input_model.meta.instrument.filter}.')
                     self.log.error('extract_1d will be skipped.')
                     input_model.meta.cal_step.extract_1d = 'SKIPPED'
                     return input_model
@@ -412,19 +410,16 @@ class Extract1dStep(Step):
                     self.log.info('Exposure is in the SUBSTRIP256 subarray.')
                     self.log.info('Traces 1 and 2 will be modelled and decontaminated before extraction.')
                     subarray = 'SUBSTRIP256'
-                elif input_model.meta.subarray.name == 'FULL':
-                    self.log.info('Exposure is in the FULL subarray.')
-                    self.log.info('Traces 1 and 2 will be modelled and decontaminated before extraction.')
-                    subarray = 'FULL'
                 elif input_model.meta.subarray.name == 'SUBSTRIP96':
                     self.log.info('Exposure is in the SUBSTRIP96 subarray.')
                     self.log.info('Traces of orders 1 and 2 will be modelled but only order 1'
                                   ' will be decontaminated before extraction.')
                     subarray = 'SUBSTRIP96'
                 else:
-                    self.log.error('The SOSS extraction is implemented for the SUBSTRIP256,'
-                                   ' SUBSTRIP96 and FULL subarray only.')
-                    self.log.error('extract_1d will be skipped.')
+                    self.log.error('The SOSS extraction is implemented for the SUBSTRIP256'
+                                   'and SUBSTRIP96 subarrays only. Subarray is currently '
+                                   f'{input_model.meta.subarray.name}.')
+                    self.log.error('Extract1dStep will be skipped.')
                     input_model.meta.cal_step.extract_1d = 'SKIPPED'
                     return input_model
 

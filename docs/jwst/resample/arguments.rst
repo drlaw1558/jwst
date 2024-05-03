@@ -12,7 +12,7 @@ image.
 
 ``--kernel`` (str, default='square')
     The form of the kernel function used to distribute flux onto the output
-    image.  Available kernels are `square`, `gaussian`, `point`, `tophat`,
+    image.  Available kernels are `square`, `gaussian`, `point`,
     `turbo`, `lanczos2`, and `lanczos3`.
 
 ``--pixel_scale_ratio`` (float, default=1.0)
@@ -62,7 +62,23 @@ image.
     under the root of the file. The output image size is determined from the
     bounding box of the WCS (if any). Argument ``output_shape`` overrides
     computed image size and it is required when output WCS does not have
-    ``bounding_box`` property set.
+    ``bounding_box`` property set or if ``pixel_shape`` or ``array_shape`` keys
+    (see below) are not provided.
+
+    Additional information may be stored under
+    other keys under the root of the file. Currently, the following keys are
+    recognized:
+
+    - ``pixel_area``: Indicates average pixel area of the output WCS in
+      units of steradians. When provided, this value will be used for updating
+      photometric quantities  ``PIXAR_SR`` and ``PIXAR_A2`` of the output image.
+      If ``pixel_area`` is not provided, the code will attempt to estimate
+      this value from the WCS.
+
+    - ``pixel_shape``: dimensions of the output image in the order (nx, ny).
+      Overrides the value of ``array_shape`` if provided.
+
+    - ``array_shape``: shape of the output image in ``numpy`` order: (ny, nx).
 
     .. note::
         When ``output_wcs`` is specified, WCS-related arguments such as
@@ -80,7 +96,8 @@ image.
     (VAR_RNOISE) array stored in each input image. If the VAR_RNOISE array does
     not exist, the variance is set to 1 for all pixels (equal weighting).
     If `weight_type=exptime`, the scaling value will be set equal to the
-    exposure time found in the image header.
+    measurement time (TMEASURE) found in the image header if available;
+    if unavailable, the scaling will be set equal to the exposure time (EFFEXPTM).
 
 ``--single`` (bool, default=False)
     If set to `True`, resample each input image into a separate output.  If
@@ -99,3 +116,8 @@ image.
 
     For example, if set to ``0.5``, only resampled images that use less than
     half the available memory can be created.
+
+``--in_memory`` (boolean, default=True)
+  Specifies whether or not to load and create all images that are used during
+  processing into memory. If ``False``, input files are loaded from disk when
+  needed and all intermediate files are stored on disk, rather than in memory.

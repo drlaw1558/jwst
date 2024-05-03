@@ -19,7 +19,7 @@ from jwst.datamodels import ModelContainer
 
 # LOCAL
 from ..stpipe import Step
-from ..assign_wcs.util import update_fits_wcsinfo
+from ..assign_wcs.util import update_fits_wcsinfo, update_s_region_imaging
 from . import astrometric_utils as amutils
 from . tweakreg_catalog import make_tweakreg_catalog
 
@@ -56,21 +56,35 @@ class TweakRegStep(Step):
         use_custom_catalogs = boolean(default=False) # Use custom user-provided catalogs?
         catalog_format = string(default='ecsv') # Catalog output file format
         catfile = string(default='') # Name of the file with a list of custom user-provided catalogs
+        starfinder = option('dao', 'iraf', 'segmentation', default='dao') # Star finder to use.
+        snr_threshold = float(default=10.0) # SNR threshold above the bkg for star finder
+        # kwargs for DAOStarFinder and IRAFStarFinder, only used if starfinder is 'dao' or 'iraf'
         kernel_fwhm = float(default=2.5) # Gaussian kernel FWHM in pixels
-        snr_threshold = float(default=10.0) # SNR threshold above the bkg
+        minsep_fwhm = float(default=0.0) # Minimum separation between detected objects in FWHM
+        sigma_radius = float(default=1.5) # Truncation radius of the Gaussian kernel in units of sigma
         sharplo = float(default=0.2) # The lower bound on sharpness for object detection.
         sharphi = float(default=1.0) # The upper bound on sharpness for object detection.
         roundlo = float(default=-1.0) # The lower bound on roundness for object detection.
         roundhi = float(default=1.0) # The upper bound on roundness for object detection.
         brightest = integer(default=200) # Keep top ``brightest`` objects
         peakmax = float(default=None) # Filter out objects with pixel values >= ``peakmax``
+        # kwargs for SourceCatalog and SourceFinder, only used if starfinder is 'segmentation'
+        npixels = integer(default=10) # Minimum number of connected pixels
+        connectivity = option(4, 8, default=8) # The connectivity defining the neighborhood of a pixel
+        nlevels = integer(default=32) # Number of multi-thresholding levels for deblending
+        contrast = float(default=0.001) # Fraction of total source flux an object must have to be deblended
+        multithresh_mode = option('exponential', 'linear', 'sinh', default='exponential') # Multi-thresholding mode
+        localbkg_width = integer(default=0) # Width of rectangular annulus used to compute local background around each source
+        apermask_method = option('correct', 'mask', 'none', default='correct') # How to handle neighboring sources
+        kron_params = float_list(min=2, max=3, default=None) # Parameters defining Kron aperture
+        # continue args for rest of step
         bkg_boxsize = integer(default=400) # The background mesh box size in pixels.
         enforce_user_order = boolean(default=False) # Align images in user specified order?
         expand_refcat = boolean(default=False) # Expand reference catalog with new sources?
         minobj = integer(default=15) # Minimum number of objects acceptable for matching
         searchrad = float(default=2.0) # The search radius in arcsec for a match
         use2dhist = boolean(default=True) # Use 2d histogram to find initial offset?
-        separation = float(default=1.0) # Minimum object separation in arcsec
+        separation = float(default=1.0) # Minimum object separation for xyxymatch in arcsec
         tolerance = float(default=0.7) # Matching tolerance for xyxymatch in arcsec
         xoffset = float(default=0.0), # Initial guess for X offset in arcsec
         yoffset = float(default=0.0) # Initial guess for Y offset in arcsec
@@ -170,12 +184,32 @@ class TweakRegStep(Step):
 
             else:
                 # source finding
+                starfinder_kwargs = {
+                    'fwhm': self.kernel_fwhm,
+                    'sigma_radius': self.sigma_radius,
+                    'minsep_fwhm': self.minsep_fwhm,
+                    'sharplo': self.sharplo,
+                    'sharphi': self.sharphi,
+                    'roundlo': self.roundlo,
+                    'roundhi': self.roundhi,
+                    'peakmax': self.peakmax,
+                    'brightest': self.brightest,
+                    'npixels': self.npixels,
+                    'connectivity': int(self.connectivity),  # option returns a string, so cast to int
+                    'nlevels': self.nlevels,
+                    'contrast': self.contrast,
+                    'mode': self.multithresh_mode,
+                    'error': image_model.err,
+                    'localbkg_width': self.localbkg_width,
+                    'apermask_method': self.apermask_method,
+                    'kron_params': self.kron_params,
+                }
+
                 catalog = make_tweakreg_catalog(
-                    image_model, self.kernel_fwhm, self.snr_threshold,
-                    sharplo=self.sharplo, sharphi=self.sharphi,
-                    roundlo=self.roundlo, roundhi=self.roundhi,
-                    brightest=self.brightest, peakmax=self.peakmax,
-                    bkg_boxsize=self.bkg_boxsize
+                    image_model, self.snr_threshold,
+                    starfinder=self.starfinder,
+                    bkg_boxsize=self.bkg_boxsize,
+                    starfinder_kwargs=starfinder_kwargs,
                 )
                 new_cat = True
 
@@ -209,23 +243,7 @@ class TweakRegStep(Step):
                               .format(len(catalog), filename))
 
             if new_cat and self.save_catalogs:
-                catalog_filename = filename.replace(
-                    '.fits', '_cat.{}'.format(self.catalog_format)
-                )
-                if self.catalog_format == 'ecsv':
-                    fmt = 'ascii.ecsv'
-                elif self.catalog_format == 'fits':
-                    # NOTE: The catalog must not contain any 'None' values.
-                    #       FITS will also not clobber existing files.
-                    fmt = 'fits'
-                else:
-                    raise ValueError(
-                        '\'catalog_format\' must be "ecsv" or "fits".'
-                    )
-                catalog.write(catalog_filename, format=fmt, overwrite=True)
-                self.log.info('Wrote source catalog: {}'
-                              .format(catalog_filename))
-                image_model.meta.tweakreg_catalog = catalog_filename
+                image_model = self._write_catalog(image_model, catalog, filename)
 
             # Temporarily attach catalog to the image model so that it follows
             # the grouping by exposure, to be removed after use below
@@ -261,15 +279,13 @@ class TweakRegStep(Step):
             g = grp_img[0]
             if len(g) == 0:
                 raise AssertionError("Logical error in the pipeline code.")
-            group_name = _common_name(g)
             imcats = list(map(self._imodel2wcsim, g))
             # Remove the attached catalogs
             for model in g:
                 del model.catalog
-            self.log.info("* Images in GROUP '{}':".format(group_name))
+            self.log.info(f"* Images in GROUP '{imcats[0].meta['group_id']}':")
             for im in imcats:
-                im.meta['group_id'] = group_name
-                self.log.info("     {}".format(im.meta['name']))
+                self.log.info(f"     {im.meta['name']}")
 
             self.log.info('')
 
@@ -280,15 +296,13 @@ class TweakRegStep(Step):
                 if len(g) == 0:
                     raise AssertionError("Logical error in the pipeline code.")
                 else:
-                    group_name = _common_name(g)
                     wcsimlist = list(map(self._imodel2wcsim, g))
                     # Remove the attached catalogs
                     for model in g:
                         del model.catalog
-                    self.log.info("* Images in GROUP '{}':".format(group_name))
+                    self.log.info(f"* Images in GROUP '{wcsimlist[0].meta['group_id']}':")
                     for im in wcsimlist:
-                        im.meta['group_id'] = group_name
-                        self.log.info("     {}".format(im.meta['name']))
+                        self.log.info(f"     {im.meta['name']}")
                     imcats.extend(wcsimlist)
 
             self.log.info('')
@@ -377,7 +391,10 @@ class TweakRegStep(Step):
             #        whatever convention is determined by the JWST Cal Working
             #        Group.
             if self.save_abs_catalog:
-                output_name = 'fit_{}_ref.ecsv'.format(self.abs_refcat.lower())
+                if self.output_dir is None:
+                    output_name = 'fit_{}_ref.ecsv'.format(self.abs_refcat.lower())
+                else:
+                    output_name = path.join(self.output_dir, 'fit_{}_ref.ecsv'.format(self.abs_refcat.lower()))
             else:
                 output_name = None
 
@@ -472,6 +489,7 @@ class TweakRegStep(Step):
                     imcat.wcs.name = "FIT-LVL3-{}".format(self.abs_refcat)
 
                 image_model.meta.wcs = imcat.wcs
+                update_s_region_imaging(image_model)
 
                 # Also update FITS representation in input exposures for
                 # subsequent reprocessing by the end-user.
@@ -488,6 +506,53 @@ class TweakRegStep(Step):
                     )
 
         return images
+
+    def _write_catalog(self, image_model, catalog, filename):
+        '''
+        Determine output filename for catalog based on outfile for step
+        and output dir, then write catalog to file.
+
+        Parameters
+        ----------
+        image_model : jwst.datamodels.ImageModel
+            Image model containing the source catalog.
+        catalog : astropy.table.Table
+            Table containing the source catalog.
+        filename : str
+            Output filename for step
+
+        Returns
+        -------
+        image_model : jwst.datamodels.ImageModel
+            Image model with updated catalog information.
+        '''
+
+        catalog_filename = str(filename).replace(
+                    '.fits', '_cat.{}'.format(self.catalog_format)
+                )
+        if self.catalog_format == 'ecsv':
+            fmt = 'ascii.ecsv'
+        elif self.catalog_format == 'fits':
+            # NOTE: The catalog must not contain any 'None' values.
+            #       FITS will also not clobber existing files.
+            fmt = 'fits'
+        else:
+            raise ValueError(
+                '\'catalog_format\' must be "ecsv" or "fits".'
+            )
+        if self.output_dir is None:
+            catalog.write(catalog_filename, format=fmt, overwrite=True)
+        else:
+            catalog.write(
+                path.join(self.output_dir, catalog_filename),
+                format=fmt,
+                overwrite=True
+            )
+        self.log.info('Wrote source catalog: {}'
+                      .format(catalog_filename))
+        image_model.meta.tweakreg_catalog = catalog_filename
+
+        return image_model
 
     def _is_wcs_correction_small(self, wcs, twcs):
         """Check that the newly tweaked wcs hasn't gone off the rails"""
@@ -534,21 +599,15 @@ class TweakRegStep(Step):
             wcsinfo={'roll_ref': refang['roll_ref'],
                      'v2_ref': refang['v2_ref'],
                      'v3_ref': refang['v3_ref']},
-            meta={'image_model': image_model, 'catalog': catalog,
-                  'name': model_name}
+            meta={
+                'image_model': image_model,
+                'catalog': catalog,
+                'name': model_name,
+                'group_id': image_model.meta.group_id,
+            }
         )
 
         return im
-
-
-def _common_name(group):
-    file_names = [path.splitext(im.meta.filename)[0].strip('_- ')
-                  for im in group]
-    fname_len = list(map(len, file_names))
-    assert all(fname_len[0] == length for length in fname_len)
-    cn = path.commonprefix(file_names)
-    assert cn
-    return cn
 
 
 def _parse_catfile(catfile):

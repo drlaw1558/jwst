@@ -47,11 +47,13 @@ TSO exposures. The instrument mode abbreviations used in the table are as follow
 +==========================================================+=====+=====+=====+=====+=====+=====+=================+======+========+=====+
 | :ref:`assign_wcs <assign_wcs_step>`                      | |c| | |c| | |c| | |c| | |c| | |c| |       |c|       | |c|  |  |c|   | |c| |
 +----------------------------------------------------------+-----+-----+-----+-----+-----+-----+-----------------+------+--------+-----+
+| :ref:`msaflagopen <msaflagopen_step>`                    |     | |c| | |c| |     |     |     |                 |      |        |     |
++----------------------------------------------------------+-----+-----+-----+-----+-----+-----+-----------------+------+--------+-----+
+| :ref:`nsclean <nsclean_step>`                            | |c| | |c| | |c| |     |     |     |                 |      |        |     |
++----------------------------------------------------------+-----+-----+-----+-----+-----+-----+-----------------+------+--------+-----+
 | :ref:`imprint <imprint_step>`                            |     | |c| | |c| |     |     |     |                 |      |        |     |
 +----------------------------------------------------------+-----+-----+-----+-----+-----+-----+-----------------+------+--------+-----+
 | :ref:`background <background_step>`                      | |c| | |c| | |c| | |c| |     | |c| |       |c|       | |c|  |  |c|   |     |
-+----------------------------------------------------------+-----+-----+-----+-----+-----+-----+-----------------+------+--------+-----+
-| :ref:`msaflagopen <msaflagopen_step>`                    |     | |c| | |c| |     |     |     |                 |      |        |     |
 +----------------------------------------------------------+-----+-----+-----+-----+-----+-----+-----------------+------+--------+-----+
 | :ref:`extract_2d <extract_2d_step>`\ :sup:`1`            | |c| | |c| |     |     |     |     |                 | |c|  |  |c|   | |c| |
 +----------------------------------------------------------+-----+-----+-----+-----+-----+-----+-----------------+------+--------+-----+
@@ -77,7 +79,7 @@ TSO exposures. The instrument mode abbreviations used in the table are as follow
 +----------------------------------------------------------+-----+-----+-----+-----+-----+-----+-----------------+------+--------+-----+
 | :ref:`residual_fringe <residual_fringe_step>` \ :sup:`2` |     |     |     |     |     | |c| |                 |      |        |     |
 +----------------------------------------------------------+-----+-----+-----+-----+-----+-----+-----------------+------+--------+-----+
-| :ref:`pixel_replace <pixel_replace_step>` \ :sup:`2`     | |c| | |c| |     | |c| | |c| |     |                 | |c|  |  |c|   |     |
+| :ref:`pixel_replace <pixel_replace_step>` \ :sup:`2`     | |c| | |c| | |c| | |c| | |c| |     |                 | |c|  |  |c|   |     |
 +----------------------------------------------------------+-----+-----+-----+-----+-----+-----+-----------------+------+--------+-----+
 | :ref:`resample_spec <resample_step>`                     | |c| | |c| |     | |c| |     |     |                 |      |        |     |
 +----------------------------------------------------------+-----+-----+-----+-----+-----+-----+-----------------+------+--------+-----+
@@ -92,7 +94,8 @@ For NIRISS and NIRCam WFSS, as well as NIRCam TSO grism exposures, the order is
 flat_field, extract_2d, and srctype (no wavecorr).
 For all other modes the order is extract_2d, srctype, wavecorr, and flat_field.
 
-:sup:`2`\ By default this step is skipped in the ``calwebb_spec2`` pipeline.
+:sup:`2`\ By default this step is skipped in the ``calwebb_spec2`` pipeline, but
+is enabled for some modes via overrides provided in parameter reference files.
 
 :sup:`3`\ NIRISS SOSS can have multiple spectral orders contribute flux to one pixel; because
 photometric correction values depend on the spectral order assigned to a pixel, the order of
@@ -180,11 +183,13 @@ abbreviations used in the table are as follows:
 +=======================================+============+==============+=================+==============+
 | :ref:`assign_wcs <assign_wcs_step>`   |   ALL      |     ALL      |       ALL       |       ALL    |
 +---------------------------------------+------------+--------------+-----------------+--------------+
+| :ref:`msaflagopen <msaflagopen_step>` |  MOS, IFU  |   MOS, IFU   |    MOS, IFU     |       MOS    |
++---------------------------------------+------------+--------------+-----------------+--------------+
+| :ref:`nsclean <nsclean_step>`         |  NONE      |    NONE      |      NONE       |      NONE    |
++---------------------------------------+------------+--------------+-----------------+--------------+
 | :ref:`imprint <imprint_step>`         |  NONE      |     IFU      |      NONE       |      NONE    |
 +---------------------------------------+------------+--------------+-----------------+--------------+
 | :ref:`background <background_step>`   |  NONE      |    NONE      |      NONE       |      NONE    |
-+---------------------------------------+------------+--------------+-----------------+--------------+
-| :ref:`msaflagopen <msaflagopen_step>` |  MOS, IFU  |   MOS, IFU   |    MOS, IFU     |       MOS    |
 +---------------------------------------+------------+--------------+-----------------+--------------+
 | :ref:`extract_2d <extract_2d_step>`   |  MOS, FS   |   MOS, FS    |    MOS, FS      |       MOS    |
 +---------------------------------------+------------+--------------+-----------------+--------------+
@@ -248,9 +253,9 @@ Inputs
 :File suffix: _rate or _rateints
 
 The input to the ``Spec2Pipeline`` pipeline is a countrate exposure, in the form
-of either "_rate" or "_rateints" data. A single input file can be processed or an
-ASN file listing multiple inputs can be used, in which case the processing steps
-will be applied to each input exposure, one at a time.
+of either "_rate" or "_rateints" data. A single input FITS file can be processed 
+or an ASN file can be used, as long as there is only one output product specified 
+in the association.
 
 If "_rateints" products are used as input, for modes other than NIRSpec Fixed Slit,
 each step applies its algorithm to each integration in the exposure, where appropriate.

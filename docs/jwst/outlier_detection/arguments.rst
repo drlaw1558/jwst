@@ -15,8 +15,8 @@ that control the behavior of the processing:
 
 ``--kernel`` (string, default='square')
   The form of the kernel function used to distribute flux onto a
-  resampled image. Options are 'square', 'turbo', 'point',
-  'lanczos', and 'tophat'.
+  resampled image. Options are 'square', 'turbo', 'point', and
+  'lanczos'.
 
 ``--fillval`` (string, default='INDEF')
   The value to assign to resampled image pixels that have zero weight or
@@ -36,16 +36,23 @@ that control the behavior of the processing:
   The percent of maximum weight to use as lower-limit for valid data;
   valid values go from 0.0 to 1.0.
 
-``--grow`` (integer, default=1)
-  The radius, in pixels, from a bad pixel for neighbor rejection.
-
 ``--snr`` (string, default='4.0 3.0')
-  The signal-to-noise values to use for bad pixel identification. Valid
-  values are a pair of floating-point values in a single string.
+  The signal-to-noise values to use for bad pixel identification.
+  Since cosmic rays often extend across several pixels the user
+  must specify two cut-off values for determining whether a pixel should
+  be masked: the first for detecting the primary cosmic ray, and the
+  second (typically lower threshold) for masking lower-level bad pixels
+  adjacent to those found in the first pass.  Valid values are a pair of
+  floating-point values in a single string.
 
 ``--scale`` (string, default='0.5 0.4')
   The scaling factor applied to derivative used to identify bad pixels.
-  Valid values are a pair of floating-point values in a single string.
+  Since cosmic rays often extend across several pixels the user
+  must specify two cut-off values for determining whether a pixel should
+  be masked: the first for detecting the primary cosmic ray, and the
+  second (typically lower threshold) for masking lower-level bad pixels
+  adjacent to those found in the first pass.  Valid values are a pair of
+  floating-point values in a single string.
 
 ``--backg`` (float, default=0.0)
   User-specified background value to apply to the median image.
@@ -63,10 +70,6 @@ that control the behavior of the processing:
   that should be considered 'good' when building the weight mask. See
   DQ flag :ref:`dq_parameter_specification` for details.
 
-``--scale_detection`` (bool, default=False)
-  Specifies whether or not to rescale the individual input images
-  to match total signal when doing comparisons.
-
 ``--allowed_memory`` (float, default=None)
   Specifies the fractional amount of
   free memory to allow when creating the resampled image. If ``None``, the
@@ -77,6 +80,10 @@ that control the behavior of the processing:
   For example, if set to ``0.5``, only resampled images that use less than half
   the available memory can be created.
 
+``--in_memory`` (boolean, default=False)
+  Specifies whether or not to load and create all images that are used during
+  processing into memory. If ``False``, input files are loaded from disk when
+  needed and all intermediate files are stored on disk, rather than in memory.
 
 Step Arguments for IFU data
 ===========================
@@ -85,12 +92,17 @@ that control the behavior of the processing:
 
 ``--kernel_size`` (string, default='7 7')
   The size of the kernel to use to normalize the pixel differences. The kernel size
-  must only contain odd values. 
+  must only contain odd values.
 
 ``--threshold_percent`` (float, default=99.8)
   The threshold (in percent) of the normalized minimum pixel difference used to identify bad pixels.
-  Pixels with   a normalized minimum pixel difference above this percentage are flagged as a outlier. 
+  Pixels with   a normalized minimum pixel difference above this percentage are flagged as a outlier.
 
 ``--save_intermediate_results`` (boolean, default=False)
   Specifies whether or not to save any intermediate products created
   during step processing.
+
+``--in_memory`` (boolean, default=False)
+  Specifies whether or not to load and create all images that are used during
+  processing into memory. If ``False``, input files are loaded from disk when
+  needed and all intermediate files are stored on disk, rather than in memory.

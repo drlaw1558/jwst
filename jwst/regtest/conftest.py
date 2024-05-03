@@ -24,12 +24,22 @@ conf.use_memmap = False
 @pytest.fixture(scope="session")
 def artifactory_repos(pytestconfig):
     """Provides Artifactory inputs_root and results_root"""
-    try:
-        inputs_root = pytestconfig.getini('inputs_root')[0]
-        results_root = pytestconfig.getini('results_root')[0]
-    except IndexError:
+    inputs_root = pytestconfig.getini('inputs_root')
+    # in pytest 8 inputs_root will be None
+    # in pytest <8 inputs_root will be []
+    # see: https://github.com/pytest-dev/pytest/pull/11594
+    # using "not inputs_root" will handle both cases
+    if not inputs_root:
         inputs_root = "jwst-pipeline"
+    else:
+        inputs_root = inputs_root[0]
+
+    results_root = pytestconfig.getini('results_root')
+    # see not above about inputs_root
+    if not results_root:
         results_root = "jwst-pipeline-results"
+    else:
+        results_root = results_root[0]
     return inputs_root, results_root
 
 
@@ -94,11 +104,11 @@ def generate_artifactory_json(request, artifactory_repos):
         postmortem(request, 'sdpdata_module')
     if rtdata:
         try:
-            # The _jail fixture from ci_watson sets tmp_path
+            # The tmp_cwd fixture sets tmp_path
             cwd = str(request.node.funcargs['tmp_path'])
         except KeyError:
-            # The jail fixture (module-scoped) returns the path
-            cwd = str(request.node.funcargs['jail'])
+            # The tmp_cwd_module fixture (module-scoped) returns the path
+            cwd = str(request.node.funcargs['tmp_cwd_module'])
         rtdata.remote_results_path = artifactory_result_path()
         rtdata.test_name = request.node.name
         # Dump the failed test traceback into rtdata
@@ -200,12 +210,12 @@ def _rtdata_fixture_implementation(artifactory_repos, envopt, request):
 
 
 @pytest.fixture(scope='function')
-def rtdata(artifactory_repos, envopt, request, _jail):
+def rtdata(artifactory_repos, envopt, request, tmp_cwd):
     return _rtdata_fixture_implementation(artifactory_repos, envopt, request)
 
 
 @pytest.fixture(scope='module')
-def rtdata_module(artifactory_repos, envopt, request, jail):
+def rtdata_module(artifactory_repos, envopt, request, tmp_cwd_module):
     return _rtdata_fixture_implementation(artifactory_repos, envopt, request)
 
 
@@ -217,7 +227,7 @@ def _sdpdata_fixture_implementation(artifactory_repos, envopt, request):
 
 
 @pytest.fixture(scope='module')
-def sdpdata_module(artifactory_repos, envopt, request, jail):
+def sdpdata_module(artifactory_repos, envopt, request, tmp_cwd_module):
     return _sdpdata_fixture_implementation(artifactory_repos, envopt, request)
 
 

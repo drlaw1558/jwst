@@ -1,12 +1,15 @@
 import copy
 import math
 import numpy as np
+import warnings
 
 from stdatamodels.jwst import datamodels
+from stdatamodels.jwst.datamodels.dqflags import pixel
 
 from . import subtract_images
 from ..assign_wcs.util import create_grism_bbox
 from astropy.stats import sigma_clip
+from astropy.utils.exceptions import AstropyUserWarning
 
 import logging
 
@@ -89,9 +92,9 @@ class ImageSubsetArray:
             jmax = jmin
 
         # Set up arrays, NaN out data/err for sigma clipping, keep DQ as 0 for bitwise_or
-        data_overlap = np.ones_like(self.data) * np.nan
-        err_overlap = np.ones_like(self.data) * np.nan
-        dq_overlap = np.zeros_like(self.data, dtype=np.uint32)
+        data_overlap = np.ones_like(other.data) * np.nan
+        err_overlap = np.ones_like(other.data) * np.nan
+        dq_overlap = np.zeros_like(other.data, dtype=np.uint32)
 
         if self.im_dim == 2:
             idx = (slice(jmin - other.jmin, jmax - other.jmin),
@@ -157,7 +160,7 @@ def background_sub(input_model, bkg_list, sigma, maxiters):
                                    )
 
     # Subtract the average background from the member
-    log.debug(' subtracting avg bkg from {}'.format(input_model.meta.filename))
+    log.info('Subtracting avg bkg from {}'.format(input_model.meta.filename))
 
     result = subtract_images.subtract(input_model, bkg_model)
 
@@ -211,6 +214,7 @@ def average_background(input_model, bkg_list, sigma, maxiters):
         log.info(f'Accumulate bkg from {bkg_file}')
 
         bkg_array = ImageSubsetArray(bkg_file)
+
         if not bkg_array.overlaps(im_array):
             # We don't overlap, so put in a bunch of NaNs so sigma-clip
             # isn't affected and move on
@@ -229,8 +233,11 @@ def average_background(input_model, bkg_list, sigma, maxiters):
 
         if bkg_dim == 3:
             # Sigma clip the bkg model's data and err along the integration axis
-            sc_bkg_data = sigma_clip(bkg_data, sigma=sigma, maxiters=maxiters, axis=0)
-            sc_bkg_err = sigma_clip(bkg_err * bkg_err, sigma=sigma, maxiters=maxiters, axis=0)
+            with warnings.catch_warnings():
+                # clipping NaNs and infs is the expected behavior
+                warnings.filterwarnings("ignore", category=AstropyUserWarning, message=".*automatically clipped.*")
+                sc_bkg_data = sigma_clip(bkg_data, sigma=sigma, maxiters=maxiters, axis=0)
+                sc_bkg_err = sigma_clip(bkg_err * bkg_err, sigma=sigma, maxiters=maxiters, axis=0)
 
             # Accumulate the integ-averaged clipped data and err for the file
             cdata[i] = sc_bkg_data.mean(axis=0)
@@ -295,7 +302,12 @@ def subtract_wfss_bkg(input_model, bkg_filename, wl_range_name, mmag_extract=Non
     # i.e. in regions we can use as background.
     if got_catalog:
         bkg_mask = mask_from_source_cat(input_model, wl_range_name, mmag_extract)
-        if bkg_mask.sum() < 100:
+        # Ensure mask has 100 pixels and that those pixels correspond to valid
+        # pixels using model DQ array
+        if np.count_nonzero(input_model.dq[bkg_mask]
+                            ^ pixel['DO_NOT_USE']
+                            & pixel['DO_NOT_USE']
+                            ) < 100:
             log.warning("Not enough background pixels to work with.")
             log.warning("Step will be SKIPPED.")
             return None

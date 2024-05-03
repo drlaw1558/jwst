@@ -32,6 +32,11 @@ SPECIAL_DEFAULT = {
     'slow': False,
 }
 SPECIAL_POOLS = {
+    'jw00016_20230331t130733_pool': {
+        'args': [],
+        'xfail': 'See issue JP-3516',
+        'slow': False,
+    },
     'jw00623_20190607t021101_pool': {
         'args': [],
         'xfail': None,
@@ -74,6 +79,16 @@ SPECIAL_POOLS = {
     },
     'jw00839_20221220t025418_pool': {
         'args': ['-i', 'o002', 'c1000'],
+        'xfail': None,
+        'slow': False,
+    },
+    'jw01093_20230626t181341_pool': {
+        'args': [],
+        'xfail': None,
+        'slow': True,
+    },
+    'jw01192_o008_pool.csv': {
+        'args': ['-i', 'o008'],
         'xfail': None,
         'slow': False,
     },

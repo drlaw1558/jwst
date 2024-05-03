@@ -1,15 +1,26 @@
 """Class definition for performing outlier detection on IFU data."""
 
-import numpy as np
-from stdatamodels.jwst import datamodels
-from scipy.signal import medfilt
-from .outlier_detection import OutlierDetection
-from stdatamodels.jwst.datamodels import dqflags
 import logging
+
+import numpy as np
+from skimage.util import view_as_windows
+
+from stdatamodels.jwst import datamodels
+from stdatamodels.jwst.datamodels import dqflags
+from .outlier_detection import OutlierDetection
+
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
 
 __all__ = ["OutlierDetectionIFU"]
+
+
+def medfilt(arr, kern_size):
+    # scipy.signal.medfilt (and many other median filters) have undefined behavior
+    # for nan inputs. See: https://github.com/scipy/scipy/issues/4800
+    padded = np.pad(arr, [[k // 2] for k in kern_size])
+    windows = view_as_windows(padded, kern_size, np.ones(len(kern_size), dtype='int'))
+    return np.nanmedian(windows, axis=np.arange(-len(kern_size), 0))
 
 
 class OutlierDetectionIFU(OutlierDetection):
@@ -30,8 +41,10 @@ class OutlierDetectionIFU(OutlierDetection):
          a. read in science data
          b. Store computed neighbor differences for all the pixels.
             The neighbor pixel  differences are defined by the dispersion axis.
-            For MIRI (disp axis = 1) the neighbors to find differences  are to the left and right of pixel
-            For NIRSpec (disp axis = 0) the neighbors to find the differences are above and below the pixel
+            For MIRI, with the dispersion axis along the y axis, the neighbors that are used to
+            to find the differences are to the left and right of each pixel being examined.
+            For NIRSpec, with the dispersion along the x axis, the neighbors that are used to
+            find the differences are above and below the pixel being examined.
       3. For each input file store the  minimum of the pixel neighbor differences
       4. Comparing all the differences from all the input data find the minimum neighbor difference
       5. Normalize minimum difference to local median of difference array
@@ -40,7 +53,7 @@ class OutlierDetectionIFU(OutlierDetection):
 
     """
 
-    def __init__(self, input_models, reffiles=None, **pars):
+    def __init__(self, input_models, **pars):
         """Initialize class for IFU data processing.
 
         Parameters
@@ -49,11 +62,8 @@ class OutlierDetectionIFU(OutlierDetection):
             list of data models as ModelContainer or ASN file,
             one data model for each input 2-D ImageModel
 
-        reffiles : dict of `~stdatamodels.jwst.datamodels.JwstDataModel`
-            Dictionary of datamodels.  Keys are reffile_types.
-
         """
-        OutlierDetection.__init__(self, input_models, reffiles=reffiles, **pars)
+        OutlierDetection.__init__(self, input_models, **pars)
 
     def create_optional_results_model(self, opt_info):
         """
@@ -195,8 +205,8 @@ class OutlierDetectionIFU(OutlierDetection):
                 # set all science data that have DO_NOT_USE to NAN
                 sci[bad] = np.nan
 
-                # Compute left and right differences (MIRI dispersion axis = 1)
-                # For NIRSpec dispersion axis = 0, these differences are top, bottom
+                # Compute left and right differences (MIRI dispersion axis = 1 along y axis)
+                # For NIRSpec dispersion axis = 0 (along the x axis), these differences are top, bottom
                 # prepend = 0 has the effect of keeping the same shape as sci and
                 # for MIRI data (disp axis = 1) the first column = sci data
                 # OR
@@ -220,7 +230,7 @@ class OutlierDetectionIFU(OutlierDetection):
         minarr = np.nanmin(diffarr, axis=0)
 
         # Normalise the differences to a local median image to deal with ultra-bright sources
-        normarr = medfilt(minarr, kernel_size=kern_size)
+        normarr = medfilt(minarr, kern_size)
         nfloor = np.nanmedian(minarr)/3
         normarr[normarr < nfloor] = nfloor  # Ensure we never divide by a tiny number
         minarr_norm = minarr / normarr

@@ -14,6 +14,8 @@ DNU = test_dq_flags["DO_NOT_USE"]
 JUMP = test_dq_flags["JUMP_DET"]
 SAT = test_dq_flags["SATURATED"]
 
+MAXIMUM_CORES = ['2', 'none', 'quarter', 'half', 'all']
+
 
 @pytest.fixture(scope="module")
 def generate_miri_reffiles():
@@ -140,7 +142,8 @@ def setup_subarray_inputs(
     return model1, gdq, rnModel, pixdq, err, gain
 
 
-def test_ramp_fit_step(generate_miri_reffiles, setup_inputs):
+@pytest.mark.parametrize("max_cores", MAXIMUM_CORES)
+def test_ramp_fit_step(generate_miri_reffiles, setup_inputs, max_cores):
     """
     Create a simple input to instantiate RampFitStep and execute a call to test
     the step class and class method.
@@ -166,7 +169,7 @@ def test_ramp_fit_step(generate_miri_reffiles, setup_inputs):
     # Call ramp fit through the step class
     slopes, cube_model = RampFitStep.call(
         model, override_gain=override_gain, override_readnoise=override_readnoise,
-        maximum_cores="none")
+        maximum_cores=max_cores)
 
     assert slopes is not None
     assert cube_model is not None
@@ -176,10 +179,10 @@ def test_ramp_fit_step(generate_miri_reffiles, setup_inputs):
     assert slopes.meta.cal_step.ramp_fit == "COMPLETE"
 
 
-def test_subarray_5groups(tmpdir_factory):
+def test_subarray_5groups(tmp_path_factory):
     # all pixel values are zero. So slope should be zero
-    gainfile = str(tmpdir_factory.mktemp("data").join("gain.fits"))
-    readnoisefile = str(tmpdir_factory.mktemp("data").join('readnoise.fits'))
+    gainfile = tmp_path_factory.mktemp("data") / "gain.fits"
+    readnoisefile = tmp_path_factory.mktemp("data") / 'readnoise.fits'
 
     model1, gdq, rnModel, pixdq, err, gain = setup_subarray_inputs(
         ngroups=5, subxstart=10, subystart=20, subxsize=5, subysize=15, readnoise=50)
@@ -195,7 +198,7 @@ def test_subarray_5groups(tmpdir_factory):
 
     # Call ramp fit through the step class
     slopes, cube_model = RampFitStep.call(
-        model1, override_gain=gainfile, override_readnoise=readnoisefile,
+        model1, override_gain=str(gainfile), override_readnoise=str(readnoisefile),
         maximum_cores="none", save_opt=True)
 
     assert slopes is not None
