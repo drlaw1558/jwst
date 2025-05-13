@@ -16,6 +16,7 @@ class SaturationStep(Step):
     spec = """
         n_pix_grow_sat = integer(default=1) # number of layers adjacent pixels to flag
         use_readpatt = boolean(default=True) # Use grouped read pattern information to assist with flagging
+        maxgroup = integer(default=1000) # Flag all groups above this as saturated
     """  # noqa: E501
 
     reference_file_types = ["saturation", "superbias"]
@@ -71,7 +72,7 @@ class SaturationStep(Step):
                 )
             else:
                 result = saturation.flag_saturation(
-                    result, ref_model, self.n_pix_grow_sat, self.use_readpatt, bias_model=bias_model
+                    result, ref_model, self.n_pix_grow_sat, self.use_readpatt, self.maxgroup, bias_model=bias_model
                 )
             result.meta.cal_step.saturation = "COMPLETE"
 

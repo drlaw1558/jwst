@@ -18,7 +18,7 @@ NO_SAT_CHECK = dqflags.pixel["NO_SAT_CHECK"]
 ATOD_LIMIT = 65535.0  # Hard DN limit of 16-bit A-to-D converter
 
 
-def flag_saturation(output_model, ref_model, n_pix_grow_sat, use_readpatt, bias_model=None):
+def flag_saturation(output_model, ref_model, n_pix_grow_sat, use_readpatt, maxgroup, bias_model=None):
     """
     Call function in stcal for flagging for saturated pixels.
 
@@ -37,6 +37,9 @@ def flag_saturation(output_model, ref_model, n_pix_grow_sat, use_readpatt, bias_
 
     use_readpatt : bool
         Use grouped read pattern information to assist with flagging
+
+    maxgroup : int
+        Groups above which to flag everything as saturated
 
     bias_model : `~jwst.datamodels.SuperBiasModel` or None, optional
         Superbias reference file data model.
@@ -94,6 +97,9 @@ def flag_saturation(output_model, ref_model, n_pix_grow_sat, use_readpatt, bias_
         zframe=zframe,
         bias=bias,
     )
+
+    # Flag later groups for MRS time correction work
+    gdq_new[:,maxgroup:,:,:] = 1
 
     # Save the flags in the output GROUPDQ array
     output_model.groupdq = gdq_new
