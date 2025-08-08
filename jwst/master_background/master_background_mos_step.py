@@ -1,19 +1,17 @@
 """Apply master background corrections to NIRSpec MOS data."""
 
-from stpipe.step import preserve_step_pars
-from jwst.stpipe import record_step_status
-
 from stdatamodels.jwst import datamodels
+from stpipe.step import preserve_step_pars
 
-from . import nirspec_utils
-from ..barshadow import barshadow_step
-from ..flatfield import flat_field_step
-from ..pathloss import pathloss_step
-from ..photom import photom_step
-from ..pixel_replace import pixel_replace_step
-from ..resample import resample_spec_step
-from ..extract_1d import extract_1d_step
-from ..stpipe import Pipeline
+from jwst.barshadow import barshadow_step
+from jwst.extract_1d import extract_1d_step
+from jwst.flatfield import flat_field_step
+from jwst.master_background import nirspec_utils
+from jwst.pathloss import pathloss_step
+from jwst.photom import photom_step
+from jwst.pixel_replace import pixel_replace_step
+from jwst.resample import resample_spec_step
+from jwst.stpipe import Pipeline, record_step_status
 
 __all__ = ["MasterBackgroundMosStep"]
 
@@ -32,60 +30,7 @@ GLOBAL_PARS_TO_IGNORE = [
 
 
 class MasterBackgroundMosStep(Pipeline):
-    """
-    Apply master background processing to NIRSpec MOS data.
-
-    For MOS, and ignoring FS, the calibration process needs to occur
-    twice: Once to calibrate background slits and create a master background.
-    Then a second time to calibrate science using the master background.
-
-    Attributes
-    ----------
-    correction_pars : dict
-        The master background information from a previous invocation of the step.
-        Keys are:
-
-        - "masterbkg_1d": `~jwst.datamodels.CombinedSpecModel`
-            The 1D version of the master background.
-        - "masterbkg_2d": `~jwst.datamodels.MultiSlitModel`
-            The 2D slit-based version of the master background.
-
-    sigma_clip : None or float
-        Optional factor for sigma clipping outliers when combining background spectra.
-    median_kernel : int
-        Optional user-supplied kernel with which to moving-median boxcar filter
-        the master background spectrum.  Must be an odd integer; even integers will be
-        rounded down to the nearest odd integer.
-    force_subtract : bool
-        Optional user-supplied flag that overrides step logic to force subtraction of the
-        master background.
-        Default is False, in which case the step logic determines if the calspec2 background step
-        has already been applied and, if so, the master background step is skipped.
-        If set to True, the step logic is bypassed and the master background is subtracted.
-    save_background : bool
-        Save computed master background.
-    user_background : None, str, or `~jwst.datamodels.CombinedSpecModel`
-        Optional user-supplied master background 1D spectrum, path to file
-        or opened datamodel
-
-    Notes
-    -----
-    The algorithm is as follows
-
-    - Calibrate all slits
-
-      - For each step
-
-        - Force the source type to be extended source for all slits.
-        - Return the correction array used.
-
-    - Create the 1D master background
-    - For each slit
-
-      - Expand out the 1D master background to match the 2D wavelength grid of the slit
-      - Reverse-calibrate the 2D background, using the correction arrays calculated above.
-      - Subtract the background from the input slit data
-    """
+    """Apply master background processing to NIRSpec MOS data."""
 
     class_alias = "master_background_mos"
 
@@ -117,6 +62,24 @@ class MasterBackgroundMosStep(Pipeline):
         """
         Compute and subtract a master background spectrum.
 
+        For MOS, and ignoring FS, the calibration process needs to occur
+        twice. Once, to calibrate background slits and create a master background.
+        Then, a second time to calibrate science using the master background.
+
+        For repeating or undoing the correction, this step makes use of
+        two special attributes:
+
+            correction_pars : dict
+                The master background information from a previous invocation of the step.
+                Keys are:
+
+                - "masterbkg_1d": `~jwst.datamodels.CombinedSpecModel`
+                    The 1D version of the master background.
+                - "masterbkg_2d": `~jwst.datamodels.MultiSlitModel`
+                    The 2D slit-based version of the master background.
+            use_correction_pars : bool
+                Use the corrections stored in `correction_pars`.
+
         Parameters
         ----------
         data : `~jwst.datamodels.MultiSlitModel`
@@ -126,12 +89,28 @@ class MasterBackgroundMosStep(Pipeline):
         -------
         result : `~jwst.datamodels.MultiSlitModel`
             The background corrected data.
+
+        Notes
+        -----
+        The algorithm is as follows:
+
+            - Calibrate all slits.  For each step:
+
+              - Force the source type to be extended source for all slits.
+              - Return the correction array used.
+
+            - Create the 1D master background
+            - For each slit:
+
+              - Expand out the 1D master background to match the 2D wavelength grid of the slit.
+              - Reverse-calibrate the 2D background, using the correction arrays calculated above.
+              - Subtract the background from the input slit data.
         """
         with datamodels.open(data) as data_model:
             # If some type of background processing had already been done. Abort.
             # UNLESS forcing is enacted.
             if not self.force_subtract and "COMPLETE" in [
-                data_model.meta.cal_step.back_sub,
+                data_model.meta.cal_step.bkg_subtract,
                 data_model.meta.cal_step.master_background,
             ]:
                 self.log.info("Background subtraction has already occurred. Skipping.")

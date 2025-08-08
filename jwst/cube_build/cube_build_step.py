@@ -1,36 +1,20 @@
 import time
+from pathlib import Path
+
+import asdf
+from astropy import units
+
+from jwst.assign_wcs.util import update_s_region_keyword
+from jwst.cube_build import cube_build, data_types, ifu_cube
 from jwst.datamodels import ModelContainer
 from jwst.lib.pipe_utils import match_nans_and_flags
-from . import cube_build
-from . import ifu_cube
-from . import data_types
-import asdf
-from ..assign_wcs.util import update_s_region_keyword
-from ..stpipe import Step, record_step_status
-from pathlib import Path
-from astropy import units
+from jwst.stpipe import Step, record_step_status
 
 __all__ = ["CubeBuildStep"]
 
 
 class CubeBuildStep(Step):
-    """
-    Create a 3-D spectral cube from IFU data.
-
-    This is the controlling routine for building IFU Spectral Cubes.
-    It loads and sets the various input data and parameters needed by
-    the cube_build_step.
-
-    This routine does the following operations:
-
-       1. Extracts the input parameters from the cubepars reference file and
-       merges them with any user-provided values.
-       2. Creates the output WCS from the input images and defines the mapping
-       between all the input arrays and the output array.
-       3. Passes the input data to the function to map all their input data
-       to the output array.
-       4. Updates the output data model with correct meta data.
-    """
+    """Create a 3-D spectral cube from IFU data."""
 
     class_alias = "cube_build"
 
@@ -70,6 +54,20 @@ class CubeBuildStep(Step):
     def process(self, input_data):
         """
         Build an IFUCube from overlapping IFUImage data.
+
+        This is the controlling routine for building IFU Spectral Cubes.
+        It loads and sets the various input data and parameters needed by
+        the cube_build_step.
+
+        This routine does the following operations:
+
+           1. Extracts the input parameters from the cubepars reference file and
+              merges them with any user-provided values.
+           2. Creates the output WCS from the input images and defines the mapping
+              between all the input arrays and the output array.
+           3. Passes the input data to the function to map all their input data
+              to the output array.
+           4. Updates the output data model with correct meta data.
 
         Parameters
         ----------

@@ -1,18 +1,18 @@
 #! /usr/bin/env python
 
-from stdatamodels.jwst import datamodels
-from jwst.datamodels import ModelContainer
-from ..stpipe import Step
 import numpy as np
+from stdatamodels.jwst import datamodels
 
-from . import spectral_leak
+from jwst.datamodels import ModelContainer
+from jwst.spectral_leak import spectral_leak
+from jwst.stpipe import Step
 
 __all__ = ["SpectralLeakStep"]
 
 
 class SpectralLeakStep(Step):
     """
-    Apply a spectral leak correction to the Channel 3A of MIRI MRS data.
+    Apply a spectral leak correction to Channel 3A of MIRI MRS data.
 
     The MIRI MRS has a spectral leak in which 6 micron light leaks into the
     12 micron channel.  This step applies a correction to the 12 micron channel.

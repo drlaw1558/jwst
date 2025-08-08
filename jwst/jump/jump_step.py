@@ -1,23 +1,21 @@
 #! /usr/bin/env python
 
-from ..stpipe import Step
 import time
 
 import numpy as np
-
-from ..lib import reffile_utils
-
-from stcal.jump.jump_class import JumpData
 from stcal.jump.jump import detect_jumps_data
-
+from stcal.jump.jump_class import JumpData
 from stdatamodels.jwst import datamodels
 from stdatamodels.jwst.datamodels import dqflags
+
+from jwst.lib import reffile_utils
+from jwst.stpipe import Step
 
 __all__ = ["JumpStep"]
 
 
 class JumpStep(Step):
-    """Step class to perform just detection using two point difference."""
+    """Perform jump detection using two point difference."""
 
     spec = """
         rejection_threshold = float(default=4.0,min=0) # CR sigma rejection threshold

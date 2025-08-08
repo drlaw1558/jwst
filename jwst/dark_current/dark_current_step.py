@@ -1,9 +1,8 @@
+import numpy as np
+from stcal.dark_current import dark_sub
 from stdatamodels.jwst import datamodels
 
-from ..stpipe import Step
-from stcal.dark_current import dark_sub
-import numpy as np
-
+from jwst.stpipe import Step
 
 __all__ = ["DarkCurrentStep"]
 
@@ -54,6 +53,8 @@ class DarkCurrentStep(Step):
             instrument = result.meta.instrument.name
             if instrument == "MIRI":
                 dark_model = datamodels.DarkMIRIModel(self.dark_name)
+            elif instrument == "NIRSPEC":
+                dark_model = datamodels.DarkNirspecModel(self.dark_name)
             else:
                 dark_model = datamodels.DarkModel(self.dark_name)
 

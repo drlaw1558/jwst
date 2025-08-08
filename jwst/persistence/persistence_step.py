@@ -1,14 +1,14 @@
 #! /usr/bin/env python
 from stdatamodels.jwst import datamodels
 
-from ..stpipe import Step
-from . import persistence
+from jwst.persistence import persistence
+from jwst.stpipe import Step
 
 __all__ = ["PersistenceStep"]
 
 
 class PersistenceStep(Step):
-    """PersistenceStep: Correct a science image for persistence."""
+    """Correct a science image for persistence."""
 
     class_alias = "persistence"
 

@@ -1,8 +1,9 @@
 """Unit tests for AMI leastsqnrm module."""
 
-import pytest
-import numpy as np
 import math
+
+import numpy as np
+import pytest
 from numpy.testing import assert_allclose
 
 from jwst.ami import leastsqnrm
@@ -21,7 +22,6 @@ def test_weighted_operations(pass_dq):
 
     np.testing.assert_almost_equal(x, [-0.5, 1])
     assert cond is None
-    print("singvals", singvals)
 
 
 @pytest.mark.parametrize("pass_dq", [False, True])

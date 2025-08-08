@@ -1,9 +1,8 @@
 #! /usr/bin/env python
 from stdatamodels.jwst import datamodels
 
-from ..stpipe import Step
-from . import fringe
-
+from jwst.fringe import fringe
+from jwst.stpipe import Step
 
 __all__ = ["FringeStep"]
 

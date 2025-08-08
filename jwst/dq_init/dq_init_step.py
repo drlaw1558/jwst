@@ -1,9 +1,8 @@
 #! /usr/bin/env python
 from stdatamodels.jwst import datamodels
 
-from ..stpipe import Step
-from . import dq_initialization
-
+from jwst.dq_init import dq_initialization
+from jwst.stpipe import Step
 
 __all__ = ["DQInitStep"]
 

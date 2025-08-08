@@ -1,7 +1,8 @@
 from collections import namedtuple
 
 import numpy as np
-from ..lib import pipe_utils
+
+from jwst.lib import pipe_utils
 
 """ This is the interface:
     mask = make_mask(input_model)
@@ -26,6 +27,8 @@ from ..lib import pipe_utils
 
 
 ReadoutParam = namedtuple("ReadoutParam", ["refout", "n", "r"])
+
+__all__ = ["normal_shape", "make_mask", "from_irs2", "to_irs2"]
 
 
 def _get_irs2_parameters(input_model, n=None, r=None):

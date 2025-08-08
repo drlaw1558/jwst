@@ -1,34 +1,30 @@
 """Work horse routines used for building ifu spectra cubes."""
 
+import logging
+import math
 import warnings
 
 import numpy as np
-import logging
-import math
-
+from astropy import units as u
+from astropy.coordinates import SkyCoord
 from astropy.stats import circmean
 from gwcs import wcstools
-
 from stdatamodels.jwst import datamodels
 from stdatamodels.jwst.datamodels import dqflags
 from stdatamodels.jwst.transforms.models import _toindex
-from astropy.coordinates import SkyCoord
-from astropy import units as u
 
-from ..model_blender import blendmeta
-from ..assign_wcs import pointing
+from jwst.assign_wcs import nirspec, pointing
+from jwst.assign_wcs.util import wrap_ra
+from jwst.cube_build import coord, cube_build_wcs_util, cube_internal_cal
+from jwst.cube_build.cube_match_sky_driz import cube_wrapper_driz  # c extension
+from jwst.cube_build.cube_match_sky_pointcloud import cube_wrapper  # c extension
 from jwst.datamodels import ModelContainer
-from ..assign_wcs import nirspec
-from ..assign_wcs.util import wrap_ra
-from . import cube_build_wcs_util
-from . import cube_internal_cal
-from . import coord
-from ..mrs_imatch.mrs_imatch_step import apply_background_2d
-from .cube_match_sky_pointcloud import cube_wrapper  # c extension
-from .cube_match_sky_driz import cube_wrapper_driz  # c extension
+from jwst.model_blender import blendmeta
+from jwst.mrs_imatch.mrs_imatch_step import apply_background_2d
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+
+__all__ = ["IFUCubeData", "IncorrectInputError", "IncorrectParameterError"]
 
 
 class IFUCubeData:
@@ -2181,24 +2177,19 @@ class IFUCubeData:
         dec3_det = np.zeros((ysize, xsize))
         dec4_det = np.zeros((ysize, xsize))
 
-        pixfrac = 1.0
-
         # determine the slice width using slice 1 and 3
         slice_wcs1 = nirspec.nrs_wcs_set_input(input_model, 0)
         detector2slicer = slice_wcs1.get_transform("detector", "slicer")
-        x, y = wcstools.grid_from_bounding_box(slice_wcs1.bounding_box)
-        across1, along1, _ = detector2slicer(x, y - 0.4999 * pixfrac)
-        across1 = across1[~np.isnan(across1)]
-        slice_loc1 = np.unique(across1)
+        mean_x, mean_y = np.mean(slice_wcs1.bounding_box[0]), np.mean(slice_wcs1.bounding_box[1])
+        slice_loc1, _, _ = detector2slicer(mean_x, mean_y)
 
         slice_wcs3 = nirspec.nrs_wcs_set_input(input_model, 2)
         detector2slicer = slice_wcs3.get_transform("detector", "slicer")
-        x, y = wcstools.grid_from_bounding_box(slice_wcs3.bounding_box)
-        across3, along3, _ = detector2slicer(x, y - 0.4999 * pixfrac)
-        across3 = across3[~np.isnan(across3)]
-        slice_loc3 = np.unique(across3)
+        mean_x, mean_y = np.mean(slice_wcs3.bounding_box[0]), np.mean(slice_wcs3.bounding_box[1])
+        slice_loc3, _, _ = detector2slicer(mean_x, mean_y)
 
         across_width = abs(slice_loc1 - slice_loc3)
+
         # for NIRSPEC each file has 30 slices
         # wcs information access separately for each slice
         nslices = 30
@@ -2838,14 +2829,12 @@ class IFUCubeData:
         return ra_new, dec_new
 
 
-# class Error_incorrect_input(Exception):
 class IncorrectInputError(Exception):
     """Raise an exception if Interpolation=area when more than 1 file is used to build cube."""
 
     pass
 
 
-# class Error_incorrect_parameter(Exception):
 class IncorrectParameterError(Exception):
     """Raise an exception if cube building parameter is nan."""
 

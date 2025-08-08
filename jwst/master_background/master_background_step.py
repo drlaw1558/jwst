@@ -1,42 +1,20 @@
 from pathlib import Path
 
 import numpy as np
-from stdatamodels.properties import merge_tree
-from stdatamodels.jwst import datamodels
 from scipy.signal import medfilt
+from stdatamodels.jwst import datamodels
+from stdatamodels.properties import merge_tree
 
+from jwst.combine_1d.combine1d import combine_1d_spectra
 from jwst.datamodels import ModelContainer
-from jwst.stpipe import record_step_status
-
-from ..stpipe import Step
-from ..combine_1d.combine1d import combine_1d_spectra
-from .expand_to_2d import expand_to_2d
+from jwst.master_background.expand_to_2d import expand_to_2d
+from jwst.stpipe import Step, record_step_status
 
 __all__ = ["MasterBackgroundStep"]
 
 
 class MasterBackgroundStep(Step):
-    """
-    Compute and subtract master background from spectra.
-
-    Attributes
-    ----------
-    median_kernel : int
-        Optional user-supplied kernel with which to moving-median boxcar
-        filter the master background spectrum.  Must be an odd integer; even integers
-        will be rounded down to the nearest odd integer.
-    user_background : None, str, or `~jwst.datamodels.MultiSpecModel`
-        Optional user-supplied master background 1D spectrum, path to file
-        or opened datamodel
-    save_background : bool, optional
-        Save computed master background.
-    force_subtract : bool, optional
-        Optional user-supplied flag that overrides step logic to force subtraction of the
-        master background. Default is False, in which case the step logic determines
-        if the calspec2 background step has already been applied and, if so, the master
-        background step is skipped. If set to True, the step logic is bypassed and the
-        master background is subtracted.
-    """
+    """Compute and subtract master background from spectra."""
 
     class_alias = "master_background"
 
@@ -248,7 +226,7 @@ class MasterBackgroundStep(Step):
                 isub = 0
                 for indata in input_model:
                     if (
-                        indata.meta.cal_step.back_sub == "COMPLETE"
+                        indata.meta.cal_step.bkg_subtract == "COMPLETE"
                         or indata.meta.cal_step.master_background == "COMPLETE"
                     ):
                         do_sub = False
@@ -276,7 +254,7 @@ class MasterBackgroundStep(Step):
             # input data is a single file
             else:
                 if (
-                    input_model.meta.cal_step.back_sub == "COMPLETE"
+                    input_model.meta.cal_step.bkg_subtract == "COMPLETE"
                     or input_model.meta.cal_step.master_background == "COMPLETE"
                 ):
                     do_sub = False

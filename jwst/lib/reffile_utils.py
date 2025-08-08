@@ -1,11 +1,22 @@
 import logging
 
 import numpy as np
-
 from stdatamodels.jwst import datamodels
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+
+__all__ = [
+    "is_subarray",
+    "ref_matches_sci",
+    "get_subarray_model",
+    "get_multistripe_subarray_model",
+    "stripe_read",
+    "generate_stripe_array",
+    "science_detector_frame_transform",
+    "detector_science_frame_transform",
+    "MatchRowError",
+    "find_row",
+]
 
 
 def is_subarray(input_model):
@@ -233,6 +244,10 @@ def get_subarray_model(sci_model, ref_model):
     """
     # If science data is in multistripe readout, use
     # multistripe-specific subarray reconstruction.
+    if not isinstance(sci_model, datamodels.JwstDataModel):
+        raise TypeError("Science model must be a JWST data model.")
+    if not isinstance(ref_model, datamodels.JwstDataModel):
+        raise TypeError("Reference model must be a JWST data model.")
     if getattr(sci_model.meta.subarray, "multistripe_reads1", None) is not None:
         return get_multistripe_subarray_model(sci_model, ref_model)
 
@@ -289,43 +304,14 @@ def get_subarray_model(sci_model, ref_model):
     # Extract subarrays from each data attribute in the particular
     # type of reference file model and return a new copy of the
     # data model
-    if isinstance(ref_model, datamodels.FlatModel):
-        sub_data = ref_model.data[ystart:ystop, xstart:xstop]
-        sub_err = ref_model.err[ystart:ystop, xstart:xstop]
-        sub_dq = ref_model.dq[ystart:ystop, xstart:xstop]
-        sub_model = datamodels.FlatModel(data=sub_data, err=sub_err, dq=sub_dq)
-        sub_model.update(ref_model)
-    elif isinstance(ref_model, datamodels.GainModel):
-        sub_data = ref_model.data[ystart:ystop, xstart:xstop]
-        sub_model = datamodels.GainModel(data=sub_data)
-        sub_model.update(ref_model)
-    elif isinstance(ref_model, datamodels.LinearityModel):
-        sub_data = ref_model.coeffs[:, ystart:ystop, xstart:xstop]
-        sub_dq = ref_model.dq[ystart:ystop, xstart:xstop]
-        sub_model = datamodels.LinearityModel(coeffs=sub_data, dq=sub_dq)
-        sub_model.update(ref_model)
-    elif isinstance(ref_model, datamodels.MaskModel):
-        sub_dq = ref_model.dq[ystart:ystop, xstart:xstop]
-        sub_model = datamodels.MaskModel(dq=sub_dq)
-        sub_model.update(ref_model)
-    elif isinstance(ref_model, datamodels.ReadnoiseModel):
-        sub_data = ref_model.data[ystart:ystop, xstart:xstop]
-        sub_model = datamodels.ReadnoiseModel(data=sub_data)
-        sub_model.update(ref_model)
-    elif isinstance(ref_model, datamodels.SaturationModel):
-        sub_data = ref_model.data[ystart:ystop, xstart:xstop]
-        sub_dq = ref_model.dq[ystart:ystop, xstart:xstop]
-        sub_model = datamodels.SaturationModel(data=sub_data, dq=sub_dq)
-        sub_model.update(ref_model)
-    elif isinstance(ref_model, datamodels.SuperBiasModel):
-        sub_data = ref_model.data[ystart:ystop, xstart:xstop]
-        sub_err = ref_model.err[ystart:ystop, xstart:xstop]
-        sub_dq = ref_model.dq[ystart:ystop, xstart:xstop]
-        sub_model = datamodels.SuperBiasModel(data=sub_data, err=sub_err, dq=sub_dq)
-        sub_model.update(ref_model)
-    else:
-        log.warning("Unsupported reference file model type")
-        sub_model = None
+    model_type = ref_model.__class__
+    sub_model = model_type()
+    primary = ref_model.get_primary_array_name()
+    for attr in {primary, "err", "dq"}:
+        if ref_model.hasattr(attr):
+            sub_data = getattr(ref_model, attr)[..., ystart:ystop, xstart:xstop]
+            setattr(sub_model, attr, sub_data)
+    sub_model.update(ref_model)
 
     return sub_model
 
@@ -571,11 +557,47 @@ def science_detector_frame_transform(data, fastaxis, slowaxis):
     # If fastaxis is x-axis
     if np.abs(fastaxis) == 1:
         # Use sign of keywords to possibly reverse the ordering of the axes.
-        data = data[..., :: slowaxis // np.abs(slowaxis), :: fastaxis // np.abs(fastaxis)]
+        data = data[..., :: np.sign(slowaxis), :: np.sign(fastaxis)]
     # Else fastaxis is y-axis, also need to transpose array
     else:
-        data = data[..., :: fastaxis // np.abs(fastaxis), :: slowaxis // np.abs(slowaxis)]
+        data = data[..., :: np.sign(fastaxis), :: np.sign(slowaxis)]
         data = np.swapaxes(data, -2, -1)
+    return data
+
+
+def detector_science_frame_transform(data, fastaxis, slowaxis):
+    """
+    Swap data array between detector and science frames.
+
+    Use the fastaxis and slowaxis keywords to invert
+    and/or transpose data array axes to move between the
+    detector frame and the science frame.
+
+    Parameters
+    ----------
+    data : np.array
+        Science array containing at least two dimensions.
+    fastaxis : int
+        Value of the fastaxis keyword for the data array
+        to be transformed.
+    slowaxis : int
+        Value of the slowaxis keyword for the data array
+        to be transformed.
+
+    Returns
+    -------
+    np.array
+        Data array transformed between detector and
+        science frames.
+    """
+    # If fastaxis is x-axis
+    if np.abs(fastaxis) == 1:
+        # Use sign of keywords to possibly reverse the ordering of the axes.
+        data = data[..., :: np.sign(slowaxis), :: np.sign(fastaxis)]
+    # Else fastaxis is y-axis, also need to transpose array
+    else:
+        data = np.swapaxes(data, -2, -1)
+        data = data[..., :: np.sign(fastaxis), :: np.sign(slowaxis)]
     return data
 
 

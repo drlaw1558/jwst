@@ -4,11 +4,15 @@
 
 import logging
 
-from .nirspec import nrs_extract2d
-from .grisms import extract_grism_objects, extract_tso_object
+from jwst.extract_2d.grisms import extract_grism_objects, extract_tso_object
+from jwst.extract_2d.nirspec import nrs_extract2d
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+
+
+__all__ = ["extract2d"]
+
+slitless_modes = ["NIS_WFSS", "NRC_WFSS", "NRC_TSGRISM"]
 
 
 def extract2d(
@@ -65,7 +69,6 @@ def extract2d(
         "NRS_AUTOFLAT",
         "NRS_AUTOWAVE",
     ]
-    slitless_modes = ["NIS_WFSS", "NRC_WFSS", "NRC_TSGRISM"]
 
     exp_type = input_model.meta.exposure.type.upper()
     log.info(f"EXP_TYPE is {exp_type}")

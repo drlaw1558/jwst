@@ -16,23 +16,24 @@ The model has the following features:
 - (partial) Mock of the Pastasoss reference model
 """
 
-import pytest
-import numpy as np
-from scipy.signal import savgol_filter
 from functools import partial
-from jwst.extract_1d.soss_extract import atoca
-from jwst.extract_1d.soss_extract import atoca_utils as au
+
+import numpy as np
+import pytest
+from scipy.signal import savgol_filter
 from stdatamodels.jwst.datamodels import PastasossModel
 
-PWCPOS = 245.85932900002442
-DATA_SHAPE = (25, 200)
-WAVE_BNDS_O1 = [2.8, 0.8]
-WAVE_BNDS_O2 = [1.4, 0.5]
-WAVE_BNDS_GRID = [0.7, 2.7]
-ORDER1_SCALING = 20.0
-ORDER2_SCALING = 2.0
-TRACE_END_IDX = [DATA_SHAPE[1], 180]
-SPECTRAL_SLOPE = 2
+from jwst.extract_1d.soss_extract import atoca
+from jwst.extract_1d.soss_extract import atoca_utils as au
+from jwst.extract_1d.soss_extract.tests.helpers import (
+    DATA_SHAPE,
+    PWCPOS,
+    TRACE_END_IDX,
+    WAVE_BNDS_GRID,
+    WAVE_BNDS_O1,
+    WAVE_BNDS_O2,
+    f_lam,
+)
 
 
 @pytest.fixture(scope="package")
@@ -309,27 +310,6 @@ def engine(
         mask_trace_profile,
         global_mask=detector_mask,
     )
-
-
-def f_lam(wl, m=SPECTRAL_SLOPE, b=0):
-    """
-    Return a linear model of flux as function of wavelength.
-
-    Parameters
-    ----------
-    wl : array[float]
-        Wavelength
-    m : float
-        Slope of linear model
-    b : float
-        Intercept of linear model
-
-    Returns
-    -------
-    array[float]
-        Flux
-    """
-    return m * wl + b
 
 
 @pytest.fixture(scope="package")

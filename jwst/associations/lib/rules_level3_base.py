@@ -1,15 +1,14 @@
 """Base classes which define the Level3 Associations."""
 
-from collections import defaultdict
 import logging
-from os.path import split
 import re
-from jwst.lib.suffix import remove_suffix
+from collections import defaultdict
+from os.path import split
 from pathlib import Path
 
+from stpipe.format_template import FormatTemplate
+
 from jwst.associations import Association, ListCategory, libpath
-from jwst.associations.registry import RegistryMarker
-from jwst.associations.lib.utilities import evaluate, is_iterable
 from jwst.associations.exceptions import (
     AssociationNotValidError,
 )
@@ -21,16 +20,18 @@ from jwst.associations.lib.constraint import (
 from jwst.associations.lib.counter import Counter
 from jwst.associations.lib.dms_base import (
     _EMPTY,
+    IMAGE2_NONSCIENCE_EXP_TYPES,
+    IMAGE2_SCIENCE_EXP_TYPES,
+    SPEC2_SCIENCE_EXP_TYPES,
     Constraint_TargetAcq,
     DMSAttrConstraint,
     DMSBaseMixin,
-    IMAGE2_SCIENCE_EXP_TYPES,
-    IMAGE2_NONSCIENCE_EXP_TYPES,
-    SPEC2_SCIENCE_EXP_TYPES,
 )
-from stpipe.format_template import FormatTemplate
 from jwst.associations.lib.member import Member
 from jwst.associations.lib.prune import prune
+from jwst.associations.lib.utilities import evaluate, is_iterable
+from jwst.associations.registry import RegistryMarker
+from jwst.lib.suffix import remove_suffix
 
 __all__ = [
     "ASN_SCHEMA",
@@ -56,7 +57,6 @@ __all__ = [
 
 # Configure logging
 logger = logging.getLogger(__name__)
-logger.addHandler(logging.NullHandler())
 
 # The schema that these associations must adhere to.
 ASN_SCHEMA = RegistryMarker.schema(libpath() / "asn_schema_jw_level3.json")
@@ -615,6 +615,54 @@ def dms_product_name_sources(asn):
     return product_name.lower()
 
 
+def dms_product_name_wfss(asn):
+    """
+    Produce product names for WFSS observations.
+
+    For this mode, the x1d products contain all sources
+    in the same product, and so the source_id is not
+    included in the product name.
+
+    Parameters
+    ----------
+    asn : Association
+        The association for which the product
+        name is to be created.
+
+    Returns
+    -------
+    str
+        The product name.
+    """
+    target = asn.get_target()
+
+    instrument = asn.get_instrument()
+
+    opt_elem = asn.get_opt_element()
+
+    slit_name = asn.get_slit_name()
+    if slit_name:
+        slit_name = "-" + slit_name
+
+    subarray = asn.get_subarray()
+    if subarray:
+        subarray = "-" + subarray
+
+    product_name_format = "jw{program}-{acid}_{target}_{instrument}_{opt_elem}{slit_name}{subarray}"
+    product_name = format_product(
+        product_name_format,
+        program=asn.data["program"],
+        acid=asn.acid.id,
+        target=target,
+        instrument=instrument,
+        opt_elem=opt_elem,
+        slit_name=slit_name,
+        subarray=subarray,
+    )
+
+    return product_name.lower()
+
+
 def dms_product_name_nrsfs_sources(asn):
     """
     Produce source-based product names for NIRSpec fixed-slit observations.
@@ -644,7 +692,7 @@ def dms_product_name_nrsfs_sources(asn):
         subarray = "-" + subarray
 
     product_name_format = (
-        "jw{program}-{acid}_{target}_{source_id}_{instrument}_{opt_elem}-{slit_name}{subarray}"
+        "jw{program}-{acid}_{target}-{source_id}_{instrument}_{opt_elem}-{slit_name}{subarray}"
     )
     product_name = format_product(
         product_name_format,

@@ -6,21 +6,27 @@ import copy
 import logging
 
 import numpy as np
-
-from astropy.modeling import bind_bounding_box
-from astropy.modeling.models import Shift, Const1D, Mapping
-from gwcs.wcstools import grid_from_bounding_box
+from astropy.modeling import CompoundModel, bind_bounding_box
+from astropy.modeling.models import Const1D, Mapping, Shift
 from gwcs.utils import _toindex
-
+from gwcs.wcstools import grid_from_bounding_box
 from stdatamodels.jwst import datamodels
-from stdatamodels.jwst.datamodels import WavelengthrangeModel, ImageModel, SlitModel
+from stdatamodels.jwst.datamodels import ImageModel, SlitModel, WavelengthrangeModel
 from stdatamodels.jwst.transforms.models import IdealToV2V3
-from astropy.modeling import CompoundModel
 
-from ..assign_wcs import util
+from jwst.assign_wcs import util
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+
+__all__ = [
+    "extract_tso_object",
+    "extract_grism_objects",
+    "clamp",
+    "compute_dispersion",
+    "compute_tso_wavelength_array",
+    "compute_tso_offset_center",
+    "compute_wfss_wavelength",
+]
 
 
 def extract_tso_object(
@@ -130,12 +136,18 @@ def extract_tso_object(
     output_model.update(input_model)
     subwcs = copy.deepcopy(input_model.meta.wcs)
 
+    # (Some) NIRCam wavelengthrange entries have a fieldpoint entry, while NIRISS does not.
+    if len(wavelengthrange[0]) == 5:
+        filter_idx = 2
+    else:
+        filter_idx = 1
+
     # Loop over spectral orders
     for order in available_orders:
         range_select = [
-            (x[2], x[3])
+            (x[-2], x[-1])
             for x in wavelengthrange
-            if (x[0] == order and x[1] == input_model.meta.instrument.filter)
+            if (x[0] == order and x[filter_idx] == input_model.meta.instrument.filter)
         ]
 
         # Use the filter that was in front of the grism for translation

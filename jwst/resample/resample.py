@@ -1,29 +1,20 @@
-import logging
 import json
-from pathlib import Path
+import logging
 import re
+from pathlib import Path
 
 import numpy as np
-
 from spherical_geometry.polygon import SphericalPolygon
-
+from stcal.resample import Resample
+from stcal.resample.utils import is_imaging_wcs
 from stdatamodels.jwst import datamodels
 from stdatamodels.jwst.datamodels.dqflags import pixel
 
-from stcal.resample import Resample
-from stcal.resample.utils import is_imaging_wcs
-
-from jwst.datamodels import ModelLibrary
+from jwst.assign_wcs import util as assign_wcs_util
 from jwst.associations.asn_from_list import asn_from_list
-
+from jwst.datamodels import ModelLibrary
 from jwst.model_blender.blender import ModelBlender
 from jwst.resample import resample_utils
-from jwst.assign_wcs import util as assign_wcs_util
-
-
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
-
 
 __all__ = [
     "input_jwst_model_to_dict",
@@ -41,7 +32,6 @@ _SUPPORTED_CUSTOM_WCS_PARS = [
 ]
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
 
 
 class ResampleImage(Resample):
@@ -63,6 +53,7 @@ class ResampleImage(Resample):
         output=None,
         enable_ctx=True,
         enable_var=True,
+        report_var=True,
         compute_err=None,
         asn_id=None,
     ):
@@ -204,7 +195,7 @@ class ResampleImage(Resample):
 
                 - ``pixel_scale`` : float, None
 
-                    Desired pixel scale (in degrees) of the output WCS. When
+                    Desired pixel scale (in arcsec) of the output WCS. When
                     provided, overrides ``pixel_scale_ratio``. Default value
                     is `None`.
 
@@ -251,6 +242,12 @@ class ResampleImage(Resample):
         enable_var : bool, optional
             Indicates whether to resample variance arrays.
 
+        report_var : bool, optional
+            Indicates whether to report variance arrays in the output model.
+            In order to get an error array when compute_err=from_var, enable_var
+            must be True, but sometimes it's useful not to save var_rnoise,
+            var_flat, and var_poisson arrays to decrease output file size.
+
         compute_err : {"from_var", "driz_err"}, None, optional
             - ``"from_var"``: compute output model's error array from
               all (Poisson, flat, readout) resampled variance arrays.
@@ -273,6 +270,7 @@ class ResampleImage(Resample):
         """
         self.input_models = input_models
         self.output_jwst_model = None
+        self._report_var = report_var
 
         self.output_dir = None
         self.output_filename = output
@@ -306,7 +304,7 @@ class ResampleImage(Resample):
             # determine output WCS:
             shape = wcs_pars.get("output_shape")
             if (pscale := wcs_pars.get("pixel_scale")) is not None:
-                pscale /= 3600.0
+                pscale /= 3600.0  # convert pixel_scale to degrees/pix
             wcs, _, ps, ps_ratio = resample_utils.resampled_wcs_from_models(
                 input_models,
                 pixel_scale_ratio=wcs_pars.get("pixel_scale_ratio", 1.0),
@@ -407,7 +405,11 @@ class ResampleImage(Resample):
             model.con = info_dict["con"]
         if self._compute_err:
             model.err = info_dict["err"]
-        if self._enable_var:
+        elif model.meta.hasattr("bunit_err"):
+            # bunit_err metadata is mapped to the err extension, so it must be removed
+            # in order to fully remove the err extension.
+            del model.meta.bunit_err
+        if self._enable_var and self._report_var:
             model.var_rnoise = info_dict["var_rnoise"]
             model.var_flat = info_dict["var_flat"]
             model.var_poisson = info_dict["var_poisson"]
@@ -658,18 +660,18 @@ class ResampleImage(Resample):
 
         # Write new PC-matrix-based WCS based on GWCS model
         transform = model.meta.wcs.forward_transform
-        model.meta.wcsinfo.crpix1 = -transform[0].offset.value + 1
-        model.meta.wcsinfo.crpix2 = -transform[1].offset.value + 1
-        model.meta.wcsinfo.cdelt1 = transform[3].factor.value
-        model.meta.wcsinfo.cdelt2 = transform[4].factor.value
-        model.meta.wcsinfo.ra_ref = transform[6].lon.value
-        model.meta.wcsinfo.dec_ref = transform[6].lat.value
+        model.meta.wcsinfo.crpix1 = transform.crpix[0] + 1
+        model.meta.wcsinfo.crpix2 = transform.crpix[1] + 1
+        model.meta.wcsinfo.cdelt1 = transform.cdelt[0]
+        model.meta.wcsinfo.cdelt2 = transform.cdelt[1]
+        model.meta.wcsinfo.ra_ref = transform.crval[0]
+        model.meta.wcsinfo.dec_ref = transform.crval[1]
         model.meta.wcsinfo.crval1 = model.meta.wcsinfo.ra_ref
         model.meta.wcsinfo.crval2 = model.meta.wcsinfo.dec_ref
-        model.meta.wcsinfo.pc1_1 = transform[2].matrix.value[0][0]
-        model.meta.wcsinfo.pc1_2 = transform[2].matrix.value[0][1]
-        model.meta.wcsinfo.pc2_1 = transform[2].matrix.value[1][0]
-        model.meta.wcsinfo.pc2_2 = transform[2].matrix.value[1][1]
+        model.meta.wcsinfo.pc1_1 = transform.pc[0][0]
+        model.meta.wcsinfo.pc1_2 = transform.pc[0][1]
+        model.meta.wcsinfo.pc2_1 = transform.pc[1][0]
+        model.meta.wcsinfo.pc2_2 = transform.pc[1][1]
         model.meta.wcsinfo.ctype1 = "RA---TAN"
         model.meta.wcsinfo.ctype2 = "DEC--TAN"
 

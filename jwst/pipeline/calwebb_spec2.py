@@ -1,38 +1,36 @@
-from pathlib import Path
-from collections import defaultdict
 import traceback
+from collections import defaultdict
+from pathlib import Path
+
 import numpy as np
-
 from stdatamodels.jwst import datamodels
-from jwst.stpipe import query_step_status
-
-from ..assign_wcs.util import NoDataOnDetectorError
-from ..lib.exposure_types import is_nrs_ifu_flatlamp, is_nrs_ifu_linelamp, is_nrs_slit_linelamp
-from ..stpipe import Pipeline
 
 # step imports
-from ..assign_wcs import assign_wcs_step
-from ..background import background_step
-from ..badpix_selfcal import badpix_selfcal_step
-from ..barshadow import barshadow_step
-from ..cube_build import cube_build_step
-from ..extract_1d import extract_1d_step
-from ..extract_2d import extract_2d_step
-from ..flatfield import flat_field_step
-from ..fringe import fringe_step
-from ..residual_fringe import residual_fringe_step
-from ..imprint import imprint_step
-from ..master_background import master_background_mos_step
-from ..msaflagopen import msaflagopen_step
-from ..nsclean import nsclean_step
-from ..pathloss import pathloss_step
-from ..photom import photom_step
-from ..pixel_replace import pixel_replace_step
-from ..resample import resample_spec_step
-from ..srctype import srctype_step
-from ..straylight import straylight_step
-from ..wavecorr import wavecorr_step
-from ..wfss_contam import wfss_contam_step
+from jwst.assign_wcs import assign_wcs_step
+from jwst.assign_wcs.util import NoDataOnDetectorError
+from jwst.background import background_step
+from jwst.badpix_selfcal import badpix_selfcal_step
+from jwst.barshadow import barshadow_step
+from jwst.cube_build import cube_build_step
+from jwst.extract_1d import extract_1d_step
+from jwst.extract_2d import extract_2d_step
+from jwst.flatfield import flat_field_step
+from jwst.fringe import fringe_step
+from jwst.imprint import imprint_step
+from jwst.lib.exposure_types import is_nrs_ifu_flatlamp, is_nrs_ifu_linelamp, is_nrs_slit_linelamp
+from jwst.master_background import master_background_mos_step
+from jwst.msaflagopen import msaflagopen_step
+from jwst.nsclean import nsclean_step
+from jwst.pathloss import pathloss_step
+from jwst.photom import photom_step
+from jwst.pixel_replace import pixel_replace_step
+from jwst.resample import resample_spec_step
+from jwst.residual_fringe import residual_fringe_step
+from jwst.srctype import srctype_step
+from jwst.stpipe import Pipeline, query_step_status
+from jwst.straylight import straylight_step
+from jwst.wavecorr import wavecorr_step
+from jwst.wfss_contam import wfss_contam_step
 
 __all__ = ["Spec2Pipeline"]
 
@@ -47,17 +45,19 @@ NRS_SLIT_TYPES = [
 ]
 WFSS_TYPES = ["NIS_WFSS", "NRC_GRISM", "NRC_WFSS"]
 GRISM_TYPES = ["NRC_TSGRISM"] + WFSS_TYPES
+EXP_TYPES_USING_REFBKGDS = WFSS_TYPES + ["NIS_SOSS"]
 
 
 class Spec2Pipeline(Pipeline):
     """
-    Processes JWST spectroscopic exposures from Level 2a to 2b.
+    Process JWST spectroscopic exposures from Level 2a to 2b.
 
     Included steps are:
-    assign_wcs, NIRSpec MSA bad shutter flagging, nsclean, background subtraction,
-    NIRSpec MSA imprint subtraction, 2-D subwindow extraction, flat field,
-    source type decision, straylight, fringe, residual_fringe, pathloss,
-    barshadow,  photom, pixel_replace, resample_spec, cube_build, and extract_1d.
+    assign_wcs, badpix_selfcal, msa_flagging, nsclean, bkg_subtract,
+    imprint_subtract, extract_2d, master_background_mos, wavecorr,
+    flat_field, srctype, straylight, fringe, residual_fringe, pathloss,
+    barshadow, wfss_contam, photom, pixel_replace, resample_spec,
+    cube_build, and extract_1d.
     """
 
     class_alias = "calwebb_spec2"
@@ -489,8 +489,8 @@ class Spec2Pipeline(Pipeline):
 
         # Check for image-to-image background subtraction can be done.
         if not self.bkg_subtract.skip:
-            if exp_type in WFSS_TYPES or len(members_by_type["background"]) > 0:
-                if exp_type in WFSS_TYPES:
+            if exp_type in EXP_TYPES_USING_REFBKGDS or len(members_by_type["background"]) > 0:
+                if exp_type in EXP_TYPES_USING_REFBKGDS:
                     members_by_type["background"] = []  # will be overwritten by the step
 
                 # Setup for saving

@@ -1,10 +1,10 @@
-import pytest
-from jwst.regtest.st_fitsdiff import STFITSDiff as FITSDiff
 import numpy as np
+import pytest
 from gwcs import wcstools
-
-from jwst.stpipe import Step
 from stdatamodels.jwst import datamodels
+
+from jwst.regtest.st_fitsdiff import STFITSDiff as FITSDiff
+from jwst.stpipe import Step
 
 # Mark all tests in this module
 pytestmark = [pytest.mark.bigdata]
@@ -29,10 +29,19 @@ def test_log_tracked_resources(log_tracked_resources, run_pipeline):
 
 
 @pytest.mark.parametrize("suffix", ["cal", "crf", "s2d", "x1d"])
-@pytest.mark.parametrize("source_id", ["b000000030", "b000000031",
-                                       "s000004385", "s000007380",
-                                       "v000000048", "v000000049",
-                                       "v000000053", "v000000056"])
+@pytest.mark.parametrize(
+    "source_id",
+    [
+        "b000000030",
+        "b000000031",
+        "s000004385",
+        "s000007380",
+        "v000000048",
+        "v000000049",
+        "v000000053",
+        "v000000056",
+    ],
+)
 def test_nirspec_mos_spec3(run_pipeline, suffix, source_id, fitsdiff_default_kwargs):
     """Check results of calwebb_spec3"""
     rtdata = run_pipeline

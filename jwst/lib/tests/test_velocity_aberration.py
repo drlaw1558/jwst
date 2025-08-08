@@ -1,10 +1,12 @@
 """
 Test script for set_velocity_aberration.py
 """
+
 import subprocess
 
-from numpy import isclose
 from astropy.io import fits
+from numpy import isclose
+
 import jwst.datamodels as dm
 from jwst.lib.set_velocity_aberration import compute_va_effects
 
@@ -45,6 +47,6 @@ def test_velocity_aberration_script(tmp_path):
     subprocess.check_call(["set_velocity_aberration", path])
 
     with fits.open(path) as hdulist_in:
-        assert isclose(hdulist_in[0].header['VA_RA'], GOOD_APPARENT_RA, rtol=0, atol=1e-7)
-        assert isclose(hdulist_in[0].header['VA_DEC'], GOOD_APPARENT_DEC, rtol=0, atol=1e-7)
-        assert isclose(hdulist_in['SCI'].header['VA_SCALE'], GOOD_SCALE_FACTOR, rtol=0, atol=1e-7)
+        assert isclose(hdulist_in[0].header["VA_RA"], GOOD_APPARENT_RA, rtol=0, atol=1e-7)
+        assert isclose(hdulist_in[0].header["VA_DEC"], GOOD_APPARENT_DEC, rtol=0, atol=1e-7)
+        assert isclose(hdulist_in["SCI"].header["VA_SCALE"], GOOD_SCALE_FACTOR, rtol=0, atol=1e-7)

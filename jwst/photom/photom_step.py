@@ -1,20 +1,14 @@
 #! /usr/bin/env python
 from stdatamodels.jwst import datamodels
 
-from ..stpipe import Step
-from . import photom
+from jwst.photom import photom
+from jwst.stpipe import Step
 
 __all__ = ["PhotomStep"]
 
 
 class PhotomStep(Step):
-    """
-    Class for applying photom calibration step.
-
-    This step loads photometric conversion information from
-    reference files and attaches or applies them to the input science
-    data model
-    """
+    """Apply photometric calibration."""
 
     class_alias = "photom"
 
@@ -29,6 +23,10 @@ class PhotomStep(Step):
     def process(self, input_data):
         """
         Execute the photom calibration step.
+
+        This step loads photometric conversion information from
+        reference files and attaches or applies them to the input science
+        data model.
 
         Parameters
         ----------

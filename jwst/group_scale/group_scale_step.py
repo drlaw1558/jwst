@@ -1,19 +1,13 @@
 from stdatamodels.jwst import datamodels
-from ..stpipe import Step
-from . import group_scale
 
+from jwst.group_scale import group_scale
+from jwst.stpipe import Step
 
 __all__ = ["GroupScaleStep"]
 
 
 class GroupScaleStep(Step):
-    """
-    Rescale group data to account for on-board frame averaging.
-
-    GroupScaleStep: Rescales group data to account for on-board
-    frame averaging that did not use FRMDIVSR = NFRAMES.
-    All groups in the exposure are rescaled by FRMDIVSR/NFRAMES.
-    """
+    """Rescale group data to account for on-board frame averaging."""
 
     class_alias = "group_scale"
 
@@ -23,6 +17,10 @@ class GroupScaleStep(Step):
     def process(self, step_input):
         """
         Perform group scale step.
+
+        Rescales group data to account for on-board
+        frame averaging that did not use FRMDIVSR = NFRAMES.
+        All groups in the exposure are rescaled by FRMDIVSR/NFRAMES.
 
         Parameters
         ----------

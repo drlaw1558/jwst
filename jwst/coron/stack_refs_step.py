@@ -1,8 +1,7 @@
 from stdatamodels.jwst import datamodels
 
-from ..stpipe import Step
-
-from . import stack_refs
+from jwst.coron import stack_refs
+from jwst.stpipe import Step
 
 __all__ = ["StackRefsStep"]
 

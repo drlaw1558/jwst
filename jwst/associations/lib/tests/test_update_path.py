@@ -1,5 +1,6 @@
 from copy import deepcopy
-from jwst.associations.lib.update_path import update_key_value, replace_path
+
+from jwst.associations.lib.update_path import replace_path, update_key_value
 
 _test_obj = {
     "a": "change",
@@ -36,7 +37,6 @@ def test_update_key_value_default():
 
 
 def test_update_key_value_mod_func():
-
     obj = deepcopy(_test_obj)
     target = "a"
     new_value = "changed"

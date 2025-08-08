@@ -27,7 +27,7 @@ in conjunction with ``photutils.segmentation.SourceCatalog``.
 
 DAOStarFinder is an implementation of the `DAOFIND`_ algorithm
 (`Stetson 1987, PASP 99, 191
-<http://adsabs.harvard.edu/abs/1987PASP...99..191S>`_).  It searches
+<https://ui.adsabs.harvard.edu/abs/1987PASP...99..191S/abstract>`_).  It searches
 images for local density maxima that have a peak amplitude greater
 than a specified threshold (the threshold is applied to a convolved
 image) and have a size and shape similar to a defined 2D Gaussian
@@ -63,7 +63,7 @@ as the retrieved star positions.
     derived source catalog and the reference catalog during the
     alignment step.
 
-.. _DAOFIND: http://stsdas.stsci.edu/cgi-bin/gethelp.cgi?daofind
+.. _DAOFIND: https://ui.adsabs.harvard.edu/abs/1987PASP...99..191S/abstract
 
 Custom Source Catalogs
 ----------------------
@@ -224,10 +224,10 @@ The ``tweakreg`` step has the following optional arguments:
 * ``snr_threshold``: A `float` value indicating SNR threshold above the
   background. Required for all star finders. (Default=10.0)
 
-**Additional source finding parameters for DAO and IRAF:**
-
 * ``kernel_fwhm``: A `float` value indicating the Gaussian kernel FWHM in
   pixels. (Default=2.5)
+
+**Additional source finding parameters for DAO and IRAF:**
 
 * ``minsep_fwhm``: A `float` value indicating the minimum separation between
   detected objects in units of number of FWHMs. (Default=0.0)

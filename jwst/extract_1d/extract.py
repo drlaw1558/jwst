@@ -1,29 +1,30 @@
-import logging
 import json
+import logging
 from json.decoder import JSONDecodeError
 from pathlib import Path
 
-from astropy.modeling import polynomial
 import numpy as np
+from astropy.modeling import polynomial
 from stdatamodels.jwst import datamodels
 from stdatamodels.jwst.datamodels.apcorr import (
     MirLrsApcorrModel,
     MirMrsApcorrModel,
+    NisWfssApcorrModel,
     NrcWfssApcorrModel,
     NrsFsApcorrModel,
-    NrsMosApcorrModel,
     NrsIfuApcorrModel,
-    NisWfssApcorrModel,
+    NrsMosApcorrModel,
 )
 
 from jwst.datamodels import ModelContainer
+from jwst.datamodels.utils import attrs_to_group_id
 from jwst.datamodels.utils.tso_multispec import make_tso_specmodel
-from jwst.lib import pipe_utils
-from jwst.lib.wcs_utils import get_wavelengths
 from jwst.extract_1d import extract1d, spec_wcs
 from jwst.extract_1d.apply_apcorr import select_apcorr
 from jwst.extract_1d.psf_profile import psf_profile
 from jwst.extract_1d.source_location import location_from_wcs
+from jwst.lib import pipe_utils
+from jwst.lib.wcs_utils import get_wavelengths
 
 __all__ = [
     "run_extract1d",
@@ -40,7 +41,6 @@ __all__ = [
 
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
 
 WFSS_EXPTYPES = ["NIS_WFSS", "NRC_WFSS", "NRC_GRISM"]
 """Exposure types to be regarded as wide-field slitless spectroscopy."""
@@ -1871,6 +1871,29 @@ def create_extraction(
 
         copy_keyword_info(data_model, slitname, spec)
 
+        if exp_type in WFSS_EXPTYPES:
+            spectral_order = data_model.meta.wcsinfo.spectral_order
+            if hasattr(data_model.meta, "filename"):
+                # calwebb_spec3 case: no separate slit input to function
+                spec.meta.filename = data_model.meta.filename
+                spec.meta.group_id = _make_group_id(data_model, spectral_order)
+            else:
+                # calwebb_spec2 case: data_model is a slit so need to get this meta from input_model
+                # In this case, group_id is expected to be the same for all slits
+                # because spec list corresponds to different sources in the same exposure
+                # The exception is spectral_order so we get that from data_model and it
+                # is handled separately
+                spec.meta.filename = getattr(input_model.meta, "filename", None)
+                spec.meta.group_id = _make_group_id(input_model, spectral_order)
+            spec.extract2d_xstart = data_model.xstart
+            spec.extract2d_ystart = data_model.ystart
+            if data_model.xstart is None or data_model.ystart is None:
+                spec.extract2d_xstop = None
+                spec.extract2d_ystop = None
+            else:
+                spec.extract2d_xstop = data_model.xstart + data_model.xsize
+                spec.extract2d_ystop = data_model.ystart + data_model.ysize
+
         if apcorr is not None:
             if hasattr(apcorr, "tabulated_correction"):
                 if apcorr.tabulated_correction is not None:
@@ -1925,6 +1948,26 @@ def create_extraction(
         output_model.spec.append(spec_list[0])
 
     return profile_model, scene_model, residual
+
+
+def _make_group_id(model, spectral_order):
+    """
+    Generate a unique ID for an exposure group, including the spectral order.
+
+    Parameters
+    ----------
+    model : DataModel
+        The input data model.
+    spectral_order : int
+        The spectral order for the exposure.
+
+    Returns
+    -------
+    str
+        The group ID.
+    """
+    group_id = attrs_to_group_id(model.meta.observation)
+    return group_id + f"_{spectral_order}"
 
 
 def _make_output_model(data_model, meta_source):

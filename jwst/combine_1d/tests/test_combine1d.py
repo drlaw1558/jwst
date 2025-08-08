@@ -1,11 +1,15 @@
 """Test operations in Combine1dStep."""
 
+import logging
+
 import numpy as np
 import pytest
 
 from jwst import datamodels
 from jwst.combine_1d import Combine1dStep
 from jwst.combine_1d.combine1d import InputSpectrumModel, check_exptime
+from jwst.datamodels.utils.tests.wfss_helpers import N_SOURCES, wfss_multi
+from jwst.tests.helpers import LogWatcher
 
 
 @pytest.fixture
@@ -193,7 +197,8 @@ def create_spec_model(npoints=10, flux=1e-9, error=1e-10, wave_range=(11, 13)):
                 var,
                 var,
                 var,
-                npixels, strict=False,
+                npixels,
+                strict=False,
             ),
         ),
         dtype=spec_dtype,
@@ -202,3 +207,57 @@ def create_spec_model(npoints=10, flux=1e-9, error=1e-10, wave_range=(11, 13)):
     spec_model = datamodels.SpecModel(spec_table=otab)
 
     return spec_model
+
+
+@pytest.fixture
+def wfss_multiexposure():
+    return wfss_multi()
+
+
+def test_wfss_multi_input(wfss_multiexposure):
+    """Smoke test to ensure combine_1d works with WFSSMultiSpecModel"""
+    result = Combine1dStep.call(wfss_multiexposure)
+    assert isinstance(result, datamodels.WFSSMultiCombinedSpecModel)
+    tab = result.spec[0].spec_table
+    assert tab.shape == (N_SOURCES,)
+    assert result.meta.cal_step.combine_1d == "COMPLETE"
+    assert np.allclose(tab["FLUX"], 1.0)
+
+    # check that metadata was passed through correctly
+    assert np.allclose(tab["SOURCE_RA"], 0.0)
+    assert np.allclose(tab["SOURCE_DEC"], 0.0)
+    assert np.all(tab["SOURCE_TYPE"] == "POINT")
+
+    assert result.spec[0].dispersion_direction == 3
+
+
+def test_allnan_skip(wfss_multiexposure, monkeypatch):
+    """Test that all-nan spectra are skipped."""
+    # Set all flux values to NaN
+    for spec in wfss_multiexposure.spec:
+        spec.spec_table["FLUX"][:] = np.nan
+
+    # message when a single spectrum has no valid flux values
+    watcher0 = LogWatcher(
+        "Input spectrum 5 order 1 from group_id 1 has no valid flux values; skipping."
+    )
+    monkeypatch.setattr(logging.getLogger("jwst.combine_1d.combine1d"), "warning", watcher0)
+    result = Combine1dStep.call(wfss_multiexposure)
+    assert result.meta.cal_step.combine_1d == "SKIPPED"
+    watcher0.assert_seen()
+
+    # check for the other log messages
+    # these must be done one at a time because the watcher can only be monkeypatched once
+    # message when no valid input spectra are found for the source
+    watcher1 = LogWatcher("No valid input spectra found for source. Skipping.")
+    monkeypatch.setattr(logging.getLogger("jwst.combine_1d.combine1d"), "error", watcher1)
+    result = Combine1dStep.call(wfss_multiexposure)
+    assert result.meta.cal_step.combine_1d == "SKIPPED"
+    watcher1.assert_seen()
+
+    # message when no valid input spectra at all are found
+    watcher2 = LogWatcher("No valid input spectra found in WFSSMultiSpecModel")
+    monkeypatch.setattr(logging.getLogger("stpipe.Combine1dStep"), "error", watcher2)
+    result = Combine1dStep.call(wfss_multiexposure)
+    assert result.meta.cal_step.combine_1d == "SKIPPED"
+    watcher2.assert_seen()

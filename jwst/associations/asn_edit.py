@@ -1,11 +1,13 @@
 """Association edit operations."""
 
-import warnings
 import os.path as op
+import warnings
 from pathlib import Path
 
-from ..lib import suffix
-from . import Association, AssociationNotValidError
+from jwst.associations import Association, AssociationNotValidError
+from jwst.lib import suffix
+
+__all__ = ["AsnFileWarning", "add", "reader", "remove"]
 
 
 class AsnFileWarning(Warning):

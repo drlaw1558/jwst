@@ -1,6 +1,15 @@
 name: test on schedule
 
 on:
+  pull_request:
+    branches:
+      - main
+      - '*x'
+    # We also want this workflow triggered if the 'run devdeps tests' label is added
+    # or present when PR is updated
+    types:
+      - synchronize
+      - labeled
   schedule:
     # Weekly Monday 6AM build
     - cron: "0 0 * * 1"
@@ -23,8 +32,10 @@ concurrency:
 
 jobs:
   latest_crds_contexts:
+    if: (github.repository == 'spacetelescope/jwst' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'run scheduled tests')))
     uses: ./.github/workflows/contexts.yml
   crds_context:
+    if: (github.repository == 'spacetelescope/jwst' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'run scheduled tests')))
     needs: [ latest_crds_contexts ]
     runs-on: ubuntu-latest
     steps:
@@ -33,8 +44,8 @@ jobs:
     outputs:
       context: ${{ steps.context.outputs.context }}
   test:
-    if: (github.repository == 'spacetelescope/jwst' && (github.event_name == 'schedule' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'run scheduled tests')))
-    uses: OpenAstronomy/github-actions-workflows/.github/workflows/tox.yml@8c0fde6f7e926df6ed7057255d29afa9c1ad5320  # v1.16.0
+    if: (github.repository == 'spacetelescope/jwst' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'run scheduled tests')))
+    uses: OpenAstronomy/github-actions-workflows/.github/workflows/tox.yml@28e947497bed4d6ec3fa1d66d198e95a1d17bc63 # v2.2.1
     needs: [ crds_context ]
     with:
       setenv: |
@@ -45,8 +56,13 @@ jobs:
         CRDS_CLIENT_RETRY_DELAY_SECONDS: 20
       cache-path: /tmp/crds_cache
       cache-key: crds-${{ needs.crds_context.outputs.context }}
+      artifact-path: |
+        results.xml
       envs: |
         - macos: py312-xdist
-        - linux: py311-pyargs-xdist
-        - linux: py3-pyargs-xdist
+          pytest-results-summary: true
+        - linux: py311-xdist
+          pytest-results-summary: true
+        - linux: py3-xdist
+          pytest-results-summary: true
 

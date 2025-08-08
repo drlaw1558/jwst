@@ -1,6 +1,7 @@
 from stdatamodels.jwst import datamodels
-from ..stpipe import Step
-from . import lastframe_sub
+
+from jwst.lastframe import lastframe_sub
+from jwst.stpipe import Step
 
 __all__ = ["LastFrameStep"]
 
@@ -9,7 +10,7 @@ class LastFrameStep(Step):
     """
     Set data quality flags for the last group in MIRI ramps.
 
-    A MIRI specific task.  If the number of groups > 2, the GROUP
+    If the number of groups > 2, the GROUP
     data quality flag for the final group will be set to DO_NOT_USE.
     """
 

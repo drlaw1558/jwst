@@ -1,13 +1,11 @@
 """Unit tests for master background subtraction."""
 
+import json
 from pathlib import Path
 
 import numpy as np
 import pytest
-import json
-
 from stdatamodels.jwst import datamodels
-from jwst.stpipe import query_step_status
 
 from jwst.assign_wcs import AssignWcsStep
 from jwst.extract_1d import Extract1dStep
@@ -19,6 +17,7 @@ from jwst.master_background.master_background_step import (
     split_container,
 )
 from jwst.srctype import SourceTypeStep
+from jwst.stpipe import query_step_status
 
 
 @pytest.fixture(scope="module")
@@ -231,7 +230,7 @@ def test_master_background_medfilt(tmp_cwd, nirspec_asn):
 def test_master_background_logic(tmp_cwd, user_background, science_image):
     """Verify if calspec2 background step was run the master background step is skipped."""
     # the background step in calspec2 was done
-    science_image.meta.cal_step.back_sub = "COMPLETE"
+    science_image.meta.cal_step.bkg_subtract = "COMPLETE"
 
     # Run with a user-supplied background
     result = MasterBackgroundStep.call(

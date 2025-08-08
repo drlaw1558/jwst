@@ -1,8 +1,8 @@
 #! /usr/bin/env python
 from stdatamodels.jwst import datamodels
 
-from ..stpipe import Step
-from . import straylight
+from jwst.stpipe import Step
+from jwst.straylight import straylight
 
 __all__ = ["StraylightStep"]
 

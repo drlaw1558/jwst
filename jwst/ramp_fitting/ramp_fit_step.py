@@ -1,23 +1,16 @@
 #! /usr/bin/env python
+import logging
+
 import numpy as np
-
 from stcal.ramp_fitting import ramp_fit
-
 from stcal.ramp_fitting.likely_fit import LIKELY_MIN_NGROUPS
-
-
 from stdatamodels.jwst import datamodels
 from stdatamodels.jwst.datamodels import dqflags
 
-
-from ..stpipe import Step
-
-from ..lib import reffile_utils
-
-import logging
+from jwst.lib import reffile_utils
+from jwst.stpipe import Step
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
 
 __all__ = ["RampFitStep"]
 
@@ -168,7 +161,7 @@ def create_optional_results_model(input_model, opt_info):
 
 
 class RampFitStep(Step):
-    """Fit line to determine the value of mean rate counts vs. time."""
+    """Fit ramp data to determine the mean count rate."""
 
     class_alias = "ramp_fit"
 

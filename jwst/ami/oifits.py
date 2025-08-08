@@ -1,17 +1,18 @@
 #! /usr/bin/env python
+import logging
 import warnings
 
 import numpy as np
-from scipy.special import comb
 from astropy.stats import sigma_clipped_stats
 from astropy.time.core import Time
-import logging
-
+from scipy.special import comb
 from stdatamodels.jwst import datamodels
-from . import leastsqnrm
+
+from jwst.ami import leastsqnrm
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+
+__all__ = ["RawOifits", "CalibOifits"]
 
 
 class RawOifits:
@@ -479,9 +480,9 @@ class RawOifits:
         oim.meta.oifits.array_name = instrument_data.arrname
         oim.meta.oifits.instrument_mode = instrument_data.pupil
 
-        oim.meta.ami.roll_ref = instrument_data.roll_ref
-        oim.meta.ami.v3yangle = instrument_data.v3iyang
-        oim.meta.ami.vparity = instrument_data.vparity
+        oim.meta.guidestar.fgs_roll_ref = instrument_data.roll_ref
+        oim.meta.guidestar.fgs_v3yangle = instrument_data.v3iyang
+        oim.meta.guidestar.fgs_vparity = instrument_data.vparity
 
         # oi_array extension data
         oim.array["TEL_NAME"] = tel_name

@@ -3,6 +3,8 @@ from stdatamodels.jwst import datamodels
 
 from jwst.datamodels.utils import flat_multispec
 
+__all__ = ["make_tso_specmodel"]
+
 
 def make_tso_specmodel(spec_list, segment=None):
     """
@@ -48,7 +50,7 @@ def make_tso_specmodel(spec_list, segment=None):
         "TDB-MID",
         "TDB-END",
     ]
-    ignore_columns = ["NELEMENTS", "SEGMENT", "INT_NUM"] + time_keys
+    ignore_columns = ["N_ALONGDISP", "SEGMENT", "INT_NUM"] + time_keys
     for i in range(n_spectra):
         input_spec = spec_list[i]
         this_output = spec_table[i]
@@ -56,14 +58,13 @@ def make_tso_specmodel(spec_list, segment=None):
         flat_multispec.populate_recarray(
             this_output,
             input_spec,
-            n_rows,
             all_cols,
             is_vector,
             ignore_columns=ignore_columns,
         )
 
         # Update the special metadata columns
-        this_output["NELEMENTS"] = n_elements[i]
+        this_output["N_ALONGDISP"] = n_elements[i]
         if segment is not None:
             this_output["SEGMENT"] = segment
         else:

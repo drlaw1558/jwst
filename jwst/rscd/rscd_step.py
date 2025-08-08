@@ -1,7 +1,7 @@
 from stdatamodels.jwst import datamodels
 
-from ..stpipe import Step
-from . import rscd_sub
+from jwst.rscd import rscd_sub
+from jwst.stpipe import Step
 
 __all__ = ["RscdStep"]
 
@@ -21,7 +21,7 @@ class RscdStep(Step):
     class_alias = "rscd"
 
     spec = """
-        """  # noqa: E501
+    """  # noqa: E501
 
     reference_file_types = ["rscd"]
 

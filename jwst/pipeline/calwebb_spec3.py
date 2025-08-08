@@ -1,52 +1,51 @@
 #!/usr/bin/env python
+import logging
 from collections import defaultdict
 from pathlib import Path
 
-from stdatamodels.jwst import datamodels
-
-from jwst.datamodels import SourceModelContainer
-from jwst.stpipe import query_step_status
-from jwst.stpipe.utilities import invariant_filename
-from ..associations.lib.rules_level3_base import format_product
-from ..exp_to_source import multislit_to_container
-from ..master_background.master_background_step import split_container
-from ..stpipe import Pipeline
-from ..lib.exposure_types import is_moving_target
+import numpy as np
+import stdatamodels.jwst.datamodels as dm
+from scipy.spatial import ConvexHull, QhullError
+from stcal.alignment.util import sregion_to_footprint
 
 # step imports
-from ..assign_mtwcs import assign_mtwcs_step
-from ..cube_build import cube_build_step
-from ..extract_1d import extract_1d_step
-from ..master_background import master_background_step
-from ..mrs_imatch import mrs_imatch_step
-from ..outlier_detection import outlier_detection_step
-from ..resample import resample_spec_step
-from ..combine_1d import combine_1d_step
-from ..photom import photom_step
-from ..spectral_leak import spectral_leak_step
-from ..pixel_replace import pixel_replace_step
+from jwst.assign_mtwcs import assign_mtwcs_step
+from jwst.associations.lib.rules_level3_base import format_product
+from jwst.combine_1d import combine_1d_step
+from jwst.cube_build import cube_build_step
+from jwst.datamodels import SourceModelContainer
+from jwst.datamodels.utils.wfss_multispec import make_wfss_multicombined, make_wfss_multiexposure
+from jwst.exp_to_source import multislit_to_container
+from jwst.extract_1d import extract_1d_step
+from jwst.lib.exposure_types import is_moving_target
+from jwst.master_background import master_background_step
+from jwst.master_background.master_background_step import split_container
+from jwst.mrs_imatch import mrs_imatch_step
+from jwst.outlier_detection import outlier_detection_step
+from jwst.photom import photom_step
+from jwst.pixel_replace import pixel_replace_step
+from jwst.resample import resample_spec_step
+from jwst.spectral_leak import spectral_leak_step
+from jwst.stpipe import Pipeline, query_step_status
+from jwst.stpipe.utilities import invariant_filename
+
+log = logging.getLogger(__name__)
 
 __all__ = ["Spec3Pipeline"]
 
 # Group exposure types
 IFU_EXPTYPES = ["MIR_MRS", "NRS_IFU"]
 SLITLESS_TYPES = ["NIS_SOSS", "NIS_WFSS", "NRC_WFSS"]
+WFSS_TYPES = ["NIS_WFSS", "NRC_WFSS"]
 
 
 class Spec3Pipeline(Pipeline):
     """
-    Spec3Pipeline: Processes JWST spectroscopic exposures from Level 2b to 3.
+    Process JWST spectroscopic exposures from Level 2b to 3.
 
-    Included steps are:
-    assign moving target wcs (assign_mtwcs)
-    master background subtraction (master_background)
-    MIRI MRS background matching (mrs_imatch)
-    outlier detection (outlier_detection)
-    2-D spectroscopic resampling (resample_spec)
-    3-D spectroscopic resampling (cube_build)
-    1-D spectral extraction (extract_1d)
-    Absolute Photometric Calibration (photom)
-    1-D spectral combination (combine_1d)
+    Included steps are: assign_mtwcs, master_background, mrs_imatch,
+    outlier_detection, pixel_replace, resample_spec, cube_build,
+    extract_1d, photom, combine_1d, and spectral_leak.
     """
 
     class_alias = "calwebb_spec3"
@@ -111,7 +110,7 @@ class Spec3Pipeline(Pipeline):
         # could either be done via LoadAsAssociation and then manually
         # load input members into models and ModelContainer, or just
         # do a direct open of all members in ASN file, e.g.
-        input_models = datamodels.open(input_data, asn_exptypes=asn_exptypes)
+        input_models = dm.open(input_data, asn_exptypes=asn_exptypes)
 
         # Immediately update the ASNTABLE keyword value in all inputs,
         # so that all outputs get the new value
@@ -173,13 +172,13 @@ class Spec3Pipeline(Pipeline):
         # sources, each represented by a MultiExposureModel instead of
         # a single ModelContainer.
         sources = [source_models]
-        if isinstance(input_models[0], datamodels.MultiSlitModel):
+        if isinstance(input_models[0], dm.MultiSlitModel):
             self.log.info("Convert from exposure-based to source-based data.")
-            sources = [
-                (name, model) for name, model in multislit_to_container(source_models).items()
-            ]
+            sources = list(multislit_to_container(source_models).items())
 
         # Process each source
+        wfss_x1d = []
+        wfss_comb = []
         for source in sources:
             # If each source is a SourceModelContainer,
             # the output name needs to be updated based on the source ID,
@@ -210,8 +209,8 @@ class Spec3Pipeline(Pipeline):
             else:
                 result = source
 
-            # The MultiExposureModel is a required output.
-            if isinstance(result, SourceModelContainer):
+            # The MultiExposureModel is a required output, except for WFSS modes.
+            if isinstance(result, SourceModelContainer) and (exptype not in WFSS_TYPES):
                 self.save_model(result, "cal")
 
             # Call the skymatch step for MIRI MRS data
@@ -275,16 +274,31 @@ class Spec3Pipeline(Pipeline):
                         self.photom.save_results = self.save_results
                         self.photom.suffix = "x1d"
                         result = self.photom.run(result)
-                else:
-                    result = self.extract_1d.run(result)
+                        result = self.combine_1d.run(result)
 
+                else:
+                    # for WFSS modes, do not save the results with one file per source
+                    # instead compile the results over the for loop to be put into a single file
+                    # at the end.
+                    self.extract_1d.save_results = False
+                    self.combine_1d.save_results = False
+                    result = self.extract_1d.run(result)
+                    wfss_x1d.append(result)
                     # Check whether extraction was completed
                     extraction_complete = (
                         result is not None and result.meta.cal_step.extract_1d == "COMPLETE"
                     )
-
-                if extraction_complete:
-                    result = self.combine_1d.run(result)
+                    if not extraction_complete:
+                        continue
+                    # Combine the results for all sources
+                    comb = self.combine_1d.run(result)
+                    comb_complete = comb is not None and comb.meta.cal_step.combine_1d == "COMPLETE"
+                    if not comb_complete:
+                        continue
+                    # add metadata that only WFSS wants
+                    comb.spec[0].source_ra = result.spec[0].spec_table["SOURCE_RA"][0]
+                    comb.spec[0].source_dec = result.spec[0].spec_table["SOURCE_DEC"][0]
+                    wfss_comb.append(comb)
 
             elif resample_complete is not None and resample_complete.upper() == "COMPLETE":
                 # If 2D data were resampled and combined, just do a 1D extraction
@@ -308,6 +322,20 @@ class Spec3Pipeline(Pipeline):
                 result = self.combine_1d.run(result)
             else:
                 self.log.warning("Resampling was not completed. Skipping extract_1d.")
+
+        # Save the final output products for WFSS modes
+        if exptype in WFSS_TYPES:
+            if self.save_results:
+                x1d_output = make_wfss_multiexposure(wfss_x1d)
+                self._populate_wfss_sregion(x1d_output, input_models)
+                x1d_filename = output_file + "_x1d.fits"
+                self.log.info(f"Saving the final x1d product as {x1d_filename}.")
+                x1d_output.save(x1d_filename)
+            if self.save_results:
+                c1d_output = make_wfss_multicombined(wfss_comb)
+                c1d_filename = output_file + "_c1d.fits"
+                self.log.info(f"Saving the final c1d product as {c1d_filename}.")
+                c1d_output.save(c1d_filename)
 
         input_models.close()
 
@@ -380,3 +408,47 @@ class Spec3Pipeline(Pipeline):
             srcid = f"s{str(source_id):>09s}"
 
         return srcid
+
+    def _populate_wfss_sregion(self, wfss_model, cal_model_list):
+        """
+        Generate cumulative S_REGION footprint from input grism images.
+
+        This takes the input model S_REGION vertices, generates a convex hull
+        from those points and returns the vertices corresponding to that hull
+        in counterclockwise order.
+
+        Parameters
+        ----------
+        wfss_model : ~datamodels.WfssMultiExposureModel
+            The newly generated WfssMultiExposureModel made as part of
+            the save operation for spec3 processing of WFSS data.
+
+        cal_model_list : list(~datamodels.MultiSlitModel)
+            The list of input_models provided to Spec3Pipeline by the
+            input association.
+        """
+        # Make array of S_REGION vertices from input model values, then generate convex hull
+        try:
+            input_sregion_vertices = np.concatenate(
+                [sregion_to_footprint(w.meta.wcsinfo.s_region) for w in cal_model_list]
+            )
+            convex_sregion_hull = ConvexHull(input_sregion_vertices)
+        except AttributeError as err:
+            log.warning(
+                "Missing S_REGION info in input files. Skipping S_REGION assignment for x1d output."
+            )
+            log.debug(err)
+            return
+        except QhullError as qerr:
+            log.warning(
+                "Error generating convex hull from input S_REGION vertices. Skipping S_REGION "
+                "assignment for x1d output."
+            )
+            log.debug(qerr)
+            return
+        # Index vertices on those selected by ConvexHull
+        # By default, ConvexHull vertices are returned in counterclockwise order
+        convex_vertices = input_sregion_vertices[convex_sregion_hull.vertices]
+        s_region = "POLYGON ICRS  " + " ".join([f"{x:.9f}" for x in convex_vertices.flatten()])
+        # Populate S_REGION in first entry of output model spec list.
+        wfss_model.spec[0].s_region = s_region

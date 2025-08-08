@@ -1,15 +1,15 @@
 #! /usr/bin/env python
 from stdatamodels.jwst import datamodels
-from ..stpipe import Step
-from ..lib import pipe_utils, reffile_utils
-from . import saturation
 
+from jwst.lib import pipe_utils, reffile_utils
+from jwst.saturation import saturation
+from jwst.stpipe import Step
 
 __all__ = ["SaturationStep"]
 
 
 class SaturationStep(Step):
-    """Sets saturation flags."""
+    """Set saturation flags."""
 
     class_alias = "saturation"
 
