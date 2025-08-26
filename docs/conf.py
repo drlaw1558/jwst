@@ -90,6 +90,7 @@ intersphinx_mapping = {
 # ones.
 extensions = [
     'numfig',
+    'numpydoc',
     'sphinxcontrib.jquery',
     'pytest_doctestplus.sphinx.doctestplus',
     'sphinx.ext.autodoc',
@@ -99,7 +100,6 @@ extensions = [
     'sphinx.ext.inheritance_diagram',
     'sphinx.ext.viewcode',
     'sphinx.ext.autosummary',
-    'sphinx.ext.napoleon',
     'sphinx_automodapi.automodapi',
     'sphinx_automodapi.automodsumm',
     'sphinx_automodapi.autodoc_enhancements',
@@ -463,6 +463,7 @@ linkcheck_retry = 5
 linkcheck_ignore = [
     "http://stsci.edu/schemas/fits-schema/",  # Old schema from CHANGES.rst
     "https://jwst-docs.stsci.edu",  # CI blocked by service provider
+    "https://outerspace.stsci.edu",  # CI blocked by service provider
     "https://jira.stsci.edu/",  # Internal access only
     r"https://github\.com/spacetelescope/jwst/(?:issues|pull)/\d+",
 ]
