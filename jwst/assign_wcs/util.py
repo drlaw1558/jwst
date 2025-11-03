@@ -525,10 +525,10 @@ def _create_grism_bbox(
                     raise ValueError("Cannot determine dispersion direction.")
 
             # Convert floating-point corner values to whole pixel indexes
-            xmin = gwutils._toindex(xmin)  # noqa: SLF001
-            xmax = gwutils._toindex(xmax)  # noqa: SLF001
-            ymin = gwutils._toindex(ymin)  # noqa: SLF001
-            ymax = gwutils._toindex(ymax)  # noqa: SLF001
+            xmin = gwutils.to_index(xmin)
+            xmax = gwutils.to_index(xmax)
+            ymin = gwutils.to_index(ymin)
+            ymax = gwutils.to_index(ymax)
 
             # Don't add objects and orders that are entirely off the detector.
             # "partial_order" marks objects that are near enough to the detector
@@ -999,7 +999,7 @@ def in_ifu_slice(slice_wcs, ra, dec, lam):
 
     Parameters
     ----------
-    slice_wcs : `~gwcs.WCS`
+    slice_wcs : `~gwcs.wcs.WCS`
         Slice WCS object.
     ra, dec, lam : float, ndarray
         Physical Coordinates.
@@ -1056,7 +1056,7 @@ def update_fits_wcsinfo(
 
     Parameters
     ----------
-    datamodel : `ImageModel`
+    datamodel : `~stdatamodels.jwst.datamodels.ImageModel`
         The input data model for imaging or WFSS mode whose ``meta.wcsinfo``
         field should be updated from GWCS. By default, ``datamodel.meta.wcs``
         is used to compute FITS WCS + SIP approximation. When ``imwcs`` is
@@ -1115,7 +1115,7 @@ def update_fits_wcsinfo(
         reference_api.html#module-astropy.modeling.projections>`_
         projection models inherited from
         :py:class:`~astropy.modeling.projections.Pix2SkyProjection`.
-    imwcs : `gwcs.WCS`, None, optional
+    imwcs : `gwcs.wcs.WCS`, None, optional
         Imaging GWCS object for WFSS mode whose FITS WCS approximation should
         be computed and stored in the ``datamodel.meta.wcsinfo`` field.
         When ``imwcs`` is `None` then WCS from ``datamodel.meta.wcs``
