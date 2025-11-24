@@ -88,15 +88,26 @@ def scipybspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrap
         if (len(rej[0]) == 0):
             break
 
+    # Catch failure case with no good results
+    if (np.nansum(spl1(xvec_use)) == 0.0):
+        spl1 = 0
+
     return spl1
 
 # Function to convert pixel positions on the old grid to doubled pixel positions
 # E.g., [0,1,2,3,4,5] goes to [-0.25, 0.25, 0.75, 1.25, 1.75, etc]
-def reindex(xvec):
+# osfac should be 2 by default
+def reindex(xvec, osfac):
     # Indices in the new array
-    newx=np.arange(np.nanmin(xvec)*2,np.nanmax(xvec+1)*2).astype(int)
+    newx = np.arange(np.nanmin(xvec) * osfac, np.nanmax(xvec + 1) * osfac).astype(int)
     # Where were these indices in the old array?
-    oldx=newx/2 -0.25
+    # Ensure these are shifted just enough that we don't round out of the original array
+    if ((osfac == 2)|(osfac == 3)):
+        shift = 0.25
+    else:
+        shift = 0.49
+    oldx = newx / osfac - shift
+
     return newx,oldx
 
 def getweights(ratio, tempfit):
@@ -126,12 +137,12 @@ def getweights(ratio, tempfit):
 # pad is the padding for the replacement window
 # iiplot is the X pixel to make plots at
 # threshsig and slopelim can be useful to decrease if there are fainter point sources that need to be spline fit too
-def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot=-343, threshsig=10, slopelim=0.1, psfoptimal=False):
+def drl_oversample(model, writeout=True, osfac=2, slstart=0, slstop=30, lrange=50, iiplot=-343, threshsig=10, slopelim=0.1, psfoptimal=False):
     detector=model.meta.instrument.detector
     if ((detector == 'NRS1')|(detector == 'NRS2')):
         mode='NIRS'
         xsize, ysize = 2048, 2048
-        xosize, yosize = xsize, ysize*2
+        xosize, yosize = xsize, ysize*osfac
         require_ngood = 15
         splinebkpt = 62
         spaceratio=1.6
@@ -141,7 +152,7 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot
         mode='MIRI'
         # Note that MIRI gets rotated internally, so these are FLIPPED from usual orientation
         xsize, ysize = 1024, 1032
-        xosize, yosize = xsize, ysize*2
+        xosize, yosize = xsize, ysize*osfac
         require_ngood = 8
         splinebkpt = 36
         spaceratio=1.2
@@ -238,9 +249,10 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot
     flux_os_residual = np.zeros([yosize, xosize]) * np.nan
 
     # Pre-compute alpha_os to avoid a WCS transform inside the loop
-    newy, oldy = reindex(np.array([0, ysize - 1]))
+    newy, oldy = reindex(np.array([0, ysize - 1]), osfac)
     y_os[:, :] = oldy[:, None]
     x_os[:, :] = basex[oldy.astype(int), :]
+
     if (mode == 'NIRS'):
         _, alpha_os, _ = model.meta.wcs.transform('detector', 'slicer', x_os, y_os)
         alpha_os = -alpha_os  # Flip so increasing with increasing Y
@@ -328,7 +340,7 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot
                 tempy = tempy[np.isfinite(tempy)].astype(int)
                 # newy is the resampled Y pixel indices in the expanded detector frame
                 # oldy is the resampled Y pixel indices in the original detector frame
-                newy, oldy = reindex(tempy)
+                newy, oldy = reindex(tempy, osfac)
                 #if ((slnum == 15)&(ii == 877)):
                 #    pdb.set_trace()
 
@@ -551,8 +563,8 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot
     # Probably a much easier way to do this...
     nantemp = flux_os_linear.copy()
     for qq in range(0, ysize):
-        nantemp[qq * 2, :] = flux_orig[qq, :]
-        nantemp[qq * 2 + 1, :] = flux_orig[qq, :]
+        nantemp[qq * osfac, :] = flux_orig[qq, :]
+        nantemp[qq * osfac + 1, :] = flux_orig[qq, :]
     indx = np.where(~np.isfinite(nantemp))
     flux_os_linear[indx] = np.nan
 
@@ -604,13 +616,13 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot
 
     return flux_os, x_os, y_os
 
-def drl_map(instrument_name,flux_os2d, x_os2d, y_os2d, x, y, ra, dec, wave_all, slice_no_all, dwave_all, corner_coord_all):
+def drl_map(instrument_name,flux_os2d, x_os2d, y_os2d, x, y, ra, dec, wave_all, slice_no_all, dwave_all, corner_coord_all, osfac=2):
     if (instrument_name == 'MIRI'):
         xsize, ysize = 1032, 1024
-        xosize, yosize = xsize*2, ysize
+        xosize, yosize = xsize*osfac, ysize
     elif (instrument_name == 'NIRSPEC'):
         xsize, ysize = 2048, 2048
-        xosize, yosize = xsize, ysize * 2
+        xosize, yosize = xsize, ysize * osfac
     else:
         print('Unknown instrument!')
 
@@ -665,8 +677,8 @@ def drl_map(instrument_name,flux_os2d, x_os2d, y_os2d, x, y, ra, dec, wave_all, 
             print('Mapping column ', ii)
         for jj in range(0,yosize):
             if (instrument_name == 'NIRSPEC'):
-                ystart = int(jj/2)-2
-                ystop = int(jj/2)+2
+                ystart = int(jj/osfac)-osfac
+                ystop = int(jj/osfac)+osfac
                 if (np.nansum(ra2d[ystart:ystop,ii]) != 0):
                     ra_os2d[jj,ii] = np.interp(y_os2d[jj,ii], y2d[ystart:ystop,ii], ra2d[ystart:ystop,ii])
                     dec_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], dec2d[ystart:ystop, ii])
@@ -682,8 +694,8 @@ def drl_map(instrument_name,flux_os2d, x_os2d, y_os2d, x, y, ra, dec, wave_all, 
                     cc_os2d6[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d6[ystart:ystop, ii])
                     cc_os2d7[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d7[ystart:ystop, ii])
             elif (instrument_name == 'MIRI'):
-                xstart = int(ii/2)-2
-                xstop = int(ii/2)+2
+                xstart = int(ii/osfac)-osfac
+                xstop = int(ii/osfac)+osfac
                 if (np.nansum(ra2d[jj,xstart:xstop]) != 0):
                     ra_os2d[jj,ii] = np.interp(x_os2d[jj,ii], x2d[jj,xstart:xstop], ra2d[jj,xstart:xstop])
                     dec_os2d[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], dec2d[jj,xstart:xstop])
@@ -700,7 +712,6 @@ def drl_map(instrument_name,flux_os2d, x_os2d, y_os2d, x, y, ra, dec, wave_all, 
                     cc_os2d7[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], cc2d7[jj,xstart:xstop])
             else:
                 print('Unknown instrument!')
-    #pdb.set_trace()
 
     indx = np.where(np.isfinite(flux_os2d))
     flux_os = flux_os2d[indx]
@@ -720,9 +731,6 @@ def drl_map(instrument_name,flux_os2d, x_os2d, y_os2d, x, y, ra, dec, wave_all, 
     cc_os6 = cc_os2d6[indx]
     cc_os7 = cc_os2d7[indx]
     cc_os = [cc_os0, cc_os1, cc_os2, cc_os3, cc_os4, cc_os5, cc_os6, cc_os7]
-
-    #pdb.set_trace()
-
 
     return flux_os, x_os, y_os, ra_os, dec_os, wave_os, slice_os, dwave_os, cc_os
 
@@ -1320,7 +1328,7 @@ class IFUCubeData:
                 log.info(f"Cube covers grating, filter: {this_gwa}, {this_fwa}")
 
     # ________________________________________________________________________________
-    def build_ifucube(self,oversample=False,threshsig=10,slopelim=0.1,psfoptimal=False):
+    def build_ifucube(self,oversample=False,osfac=2,threshsig=10,slopelim=0.1,psfoptimal=False):
         """
         Create an IFU cube.
 
@@ -1393,7 +1401,7 @@ class IFUCubeData:
                 log.debug(f"Working on Band defined by: {this_par1} {this_par2}")
 
                 if self.interpolation in ["pointcloud", "drizzle"]:
-                    pixelresult = self.map_detector_to_outputframe(this_par1, input_model, oversample, threshsig,
+                    pixelresult = self.map_detector_to_outputframe(this_par1, input_model, oversample, osfac, threshsig,
                                                                    slopelim,psfoptimal)
 
                     (
@@ -2396,7 +2404,7 @@ class IFUCubeData:
         self.print_cube_geometry()
 
     # ________________________________________________________________________________
-    def map_detector_to_outputframe(self, this_par1, input_model, oversample=False, threshsig=10, slopelim=0.1,psfoptimal=False):
+    def map_detector_to_outputframe(self, this_par1, input_model, oversample=False, osfac=2, threshsig=10, slopelim=0.1,psfoptimal=False):
         """
         Loop over a file and map the detector pixels to the output cube.
 
@@ -2492,8 +2500,8 @@ class IFUCubeData:
             else:
                 print('Unknown detector!')
 
-            flux_os2d, x_os2d, y_os2d = drl_oversample(input_model,slstart=slstart,slstop=slstop, writeout=True, threshsig=threshsig, slopelim=slopelim, psfoptimal=psfoptimal)
-            mapresult = drl_map(input_model.meta.instrument.name,flux_os2d, x_os2d, y_os2d, x, y, ra, dec, wave_all, slice_no_all, dwave_all, corner_coord_all)
+            flux_os2d, x_os2d, y_os2d = drl_oversample(input_model,osfac=osfac,slstart=slstart,slstop=slstop, writeout=True, threshsig=threshsig, slopelim=slopelim, psfoptimal=psfoptimal)
+            mapresult = drl_map(input_model.meta.instrument.name,flux_os2d, x_os2d, y_os2d, x, y, ra, dec, wave_all, slice_no_all, dwave_all, corner_coord_all, osfac=osfac)
             flux_os, x_os, y_os, ra_os, dec_os, wave_all_os, slice_no_all_os, dwave_all_os, corner_coord_all_os = mapresult
             x=x_os
             y=y_os

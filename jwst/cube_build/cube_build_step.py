@@ -51,6 +51,7 @@ class CubeBuildStep(Step):
          offset_file = string(default=None) # Filename containing a list of Ra and Dec offsets to apply to files.
          debug_spaxel = string(default='-1 -1 -1') # Default not used
          oversample = boolean(default=false) # Oversample the data
+         osfac = integer(default=2) # Degree of oversampling
          threshsig = float(default=10) # Limiting sigma for oversampling splines
          slopelim = float(default=0.1) # Slope limit for oversampling splines
          psfoptimal = boolean(default=False)
@@ -419,7 +420,7 @@ class CubeBuildStep(Step):
             # Else standard IFU cube building
             # the result returned from build_ifucube will be 1 IFU CUBE
             else:
-                result, status = thiscube.build_ifucube(self.oversample,self.threshsig,self.slopelim,self.psfoptimal)
+                result, status = thiscube.build_ifucube(self.oversample,self.osfac,self.threshsig,self.slopelim,self.psfoptimal)
 
                 # check if cube_build failed
                 # **************************
