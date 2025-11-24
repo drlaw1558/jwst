@@ -231,22 +231,33 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot
     flux_os_bspline_use = np.zeros([yosize, xosize]) * np.nan  # Actual array applied
     x_os = np.zeros([yosize, xosize]) * np.nan
     y_os = np.zeros([yosize, xosize]) * np.nan
-    alpha_os = np.zeros([yosize, xosize]) * np.nan  # Note this gets reset after each slice
+    alpha_os_slice = np.zeros([yosize, xosize]) * np.nan  # Note this gets reset after each slice
 
     # Residual corrections
     residual=np.zeros_like(flux_orig)*np.nan
     flux_os_residual = np.zeros([yosize, xosize]) * np.nan
 
+    # Pre-compute alpha_os to avoid a WCS transform inside the loop
+    newy, oldy = reindex(np.array([0, ysize - 1]))
+    y_os[:, :] = oldy[:, None]
+    x_os[:, :] = basex[oldy.astype(int), :]
+    if (mode == 'NIRS'):
+        _, alpha_os, _ = model.meta.wcs.transform('detector', 'slicer', x_os, y_os)
+        alpha_os = -alpha_os  # Flip so increasing with increasing Y
+    else:
+        # Because MIRI was rotated the indexing in the non-rotated frame needs to be adjusted slightly
+        alpha_os, _, _ = model.meta.wcs.transform('detector', 'alpha_beta', ysize - y_os - 1, x_os)
+
     for slnum in range(slstart, slstop):
         print('Oversampling slice ', slnum)
-        alpha_os[:] = np.nan
+        alpha_os_slice[:] = np.nan
         indx = np.where(slmap == slnum)
         # Data Naned out for everything except this slice
         thisdata = np.zeros_like(flux_orig) * np.nan
         thisdata[indx] = flux_orig[indx]
 
         # Define a default spline traceset, initialize to zero for this slice
-        sset_save = 0
+        spl_save = 0
 
         # A running vector of x column number in float units
         runx = np.arange(xsize).astype(float)
@@ -320,10 +331,6 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot
                 newy, oldy = reindex(tempy)
                 #if ((slnum == 15)&(ii == 877)):
                 #    pdb.set_trace()
-
-                # Do coordinate grids
-                x_os[newy, ii] = ii
-                y_os[newy, ii] = oldy
 
                 # Default approach is to do linear interpolation
                 val1, val2 = thisy[:, ii], thisdata[:, ii]
@@ -482,12 +489,8 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot
                         plt.show()
 
                     # What are the alpha values over sampled points in the old frame?
-                    if (mode == 'NIRS'):
-                        _, tempalpha, _ = model.meta.wcs.transform('detector', 'slicer', np.repeat(ii, len(oldy)), oldy)
-                        tempalpha = -tempalpha  # Flip so increasing with increasing Y
-                    else:
-                        # Because MIRI was rotated the indexing in the non-rotated frame needs to be adjusted slightly
-                        tempalpha, _, _ = model.meta.wcs.transform('detector', 'alpha_beta', ysize-oldy-1, np.repeat(ii, len(oldy)))
+                    tempalpha = alpha_os[newy, ii]
+                    alpha_os_slice[newy, ii] = tempalpha
 
                     # Define a highly-sampled alpha just to make some pretty plots with
                     alpha_forplots=np.arange(np.nanmin(tempalpha),np.nanmax(tempalpha),(np.nanmax(tempalpha) - np.nanmin(tempalpha))/1e4)
@@ -500,7 +503,6 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot
                     if trimends:
                         tempfit[0:2] = np.nan
                         tempfit[-2:] = np.nan
-                    alpha_os[newy, ii] = tempalpha
                     flux_os_bspline_full[newy, ii] = (tempfit * wmeanratio)
                     fit_forplots *= wmeanratio
                     #if (ii == iiplot):
@@ -537,7 +539,7 @@ def drl_oversample(model, writeout=True, slstart=0, slstop=30, lrange=50, iiplot
             peak_indices, _ = find_peaks(hist, height=0.2)
             amask = avec[peak_indices]
             for value in amask:
-                indx = np.where((alpha_os > value - pad * native_dalpha) & (alpha_os <= value + pad * native_dalpha))
+                indx = np.where((alpha_os_slice > value - pad * native_dalpha) & (alpha_os_slice <= value + pad * native_dalpha))
                 flux_os_bspline_use[indx] = flux_os_bspline_full[indx]
             #pdb.set_trace()
             #plt.plot(avec, hist)
