@@ -6,7 +6,7 @@ import warnings
 import matplotlib.pyplot as plt
 from matplotlib import rc
 import pdb
-from scipy.interpolate import make_lsq_spline
+from scipy.interpolate import make_lsq_spline, interp1d
 
 from scipy.signal import find_peaks
 from astropy.stats import sigma_clipped_stats as scs
@@ -35,7 +35,9 @@ __all__ = ["IFUCubeData", "IncorrectInputError", "IncorrectParameterError"]
 
 # This version uses only astropy/scipy but is roughly 3x slower
 # It has also not been optimized for science as well as bspline_wrap
-def scipybspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrapiter=10, spaceratio=1.6, verbose=False):
+# Note that iteratively rejecting too many times is dangerous, sometimes it rejects
+# too many points to get a good fit if > 3 iterations
+def scipybspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrapiter=3, spaceratio=1.6, verbose=False):
     xvec_use = xvec.copy()
     yvec_use = yvec.copy()
     sset = 0
@@ -63,6 +65,8 @@ def scipybspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrap
     # for NIRSpec detectors
     if (tenthspace > spaceratio * knotspacing):
         return 0
+    # Number of points before iterative loop
+    norig = len(xvec_use)
 
     for ii in range(0, wrapiter):
         knotspacing = (np.max(xvec_use) - np.min(xvec_use)) / nbkpts
@@ -84,6 +88,10 @@ def scipybspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrap
             print('Rejected', len(rej[0]), 'Kept', len(keep[0]))
         xvec_use = xvec_use[keep]
         yvec_use = yvec_use[keep]
+        # If over 20% of the points have been rejected fail our fitting
+        if (len(xvec_use) < 0.8*norig):
+            print('Rejected too many points, failing spline fit')
+            return 0
         # If no points rejected break out of the loop
         if (len(rej[0]) == 0):
             break
@@ -96,7 +104,7 @@ def scipybspline_wrap(xvec, yvec, nbkpts=50, wrapsig_low=3, wrapsig_high=3, wrap
 
 # Function to convert pixel positions on the old grid to doubled pixel positions
 # E.g., [0,1,2,3,4,5] goes to [-0.25, 0.25, 0.75, 1.25, 1.75, etc]
-# osfac should be 2 by default
+# osfac should be 3 by default
 def reindex(xvec, osfac):
     # Indices in the new array
     newx = np.arange(np.nanmin(xvec) * osfac, np.nanmax(xvec + 1) * osfac).astype(int)
@@ -137,7 +145,7 @@ def getweights(ratio, tempfit):
 # pad is the padding for the replacement window
 # iiplot is the X pixel to make plots at
 # threshsig and slopelim can be useful to decrease if there are fainter point sources that need to be spline fit too
-def drl_oversample(model, writeout=True, osfac=2, slstart=0, slstop=30, lrange=50, iiplot=-343, threshsig=10, slopelim=0.1, psfoptimal=False):
+def drl_oversample(model, writeout=True, osfac=3, slstart=0, slstop=30, lrange=50, iiplot=-787, threshsig=10, slopelim=0.1, psfoptimal=False):
     detector=model.meta.instrument.detector
     if ((detector == 'NRS1')|(detector == 'NRS2')):
         mode='NIRS'
@@ -341,7 +349,7 @@ def drl_oversample(model, writeout=True, osfac=2, slstart=0, slstop=30, lrange=5
                 # newy is the resampled Y pixel indices in the expanded detector frame
                 # oldy is the resampled Y pixel indices in the original detector frame
                 newy, oldy = reindex(tempy, osfac)
-                #if ((slnum == 15)&(ii == 877)):
+                #if ((slnum == 6)&(ii == 806)):
                 #    pdb.set_trace()
 
                 # Default approach is to do linear interpolation
@@ -376,13 +384,13 @@ def drl_oversample(model, writeout=True, osfac=2, slstart=0, slstop=30, lrange=5
                     datatemp = datatemp[indx]
                     # Fit a bspline
                     # 30 discrete pixels across the trace, so have double this number of breakpoints
-                    #if ((ii == 343)&(slnum == 11)):
+                    #if ((ii == 243)&(slnum == 6)):
                     #    pdb.set_trace()
 
 
                     try:
                         spl = scipybspline_wrap(alphatemp, datatemp, nbkpts=splinebkpt, wrapsig_low=2.5,
-                                                wrapsig_high=2.5, wrapiter=10, spaceratio=spaceratio, verbose=False)
+                                                wrapsig_high=2.5, wrapiter=3, spaceratio=spaceratio, verbose=False)
                         # If this routine could not get a fit (returned zero) use the saved fit
                         if (spl == 0):
                             spl = spl_save
@@ -451,12 +459,19 @@ def drl_oversample(model, writeout=True, osfac=2, slstart=0, slstop=30, lrange=5
                         weights = getweights(ratio, tempfit)
                         wmeanratio = np.nansum(ratio * weights)
 
+                    #if ((slnum == 6)&(ii == 200)):
+                    #    pdb.set_trace()
+
                     # Construct the residual between spline fit and original data
                     # then oversample it to output frame by linear interpolation
                     residual[indx,ii]=tempvalues-tempfit*wmeanratio
                     val1, val2 = thisy[:, ii], residual[:, ii]
                     indx = np.where((np.isfinite(val1)) & (np.isfinite(val2)))
-                    interpval = np.interp(oldy, val1[indx], val2[indx])
+                    # Some rare failure cases that didn't already get caught
+                    try:
+                        interpval = np.interp(oldy, val1[indx], val2[indx])
+                    except:
+                        interpval = oldy * np.nan
                     interpval[0:2] = np.nan
                     interpval[-2:] = np.nan
                     flux_os_residual[newy, ii] = interpval
@@ -564,7 +579,12 @@ def drl_oversample(model, writeout=True, osfac=2, slstart=0, slstop=30, lrange=5
     nantemp = flux_os_linear.copy()
     for qq in range(0, ysize):
         nantemp[qq * osfac, :] = flux_orig[qq, :]
-        nantemp[qq * osfac + 1, :] = flux_orig[qq, :]
+        if (osfac >= 2):
+            nantemp[qq * osfac + 1, :] = flux_orig[qq, :]
+        if (osfac >= 3):
+            nantemp[qq * osfac + 2, :] = flux_orig[qq, :]
+        if (osfac >= 4):
+            nantemp[qq * osfac + 3, :] = flux_orig[qq, :]
     indx = np.where(~np.isfinite(nantemp))
     flux_os_linear[indx] = np.nan
 
@@ -616,7 +636,12 @@ def drl_oversample(model, writeout=True, osfac=2, slstart=0, slstop=30, lrange=5
 
     return flux_os, x_os, y_os
 
-def drl_map(instrument_name,flux_os2d, x_os2d, y_os2d, x, y, ra, dec, wave_all, slice_no_all, dwave_all, corner_coord_all, osfac=2):
+# Note that we need to use an interpolator in this function that can extrapolate beyond the bounds
+# of the input functions (like scipy.interpolate.interp1d) and NOT use a constant value
+# (like np.interp).  The latter causes problems when oversampled pixels protrude slightly beyond the original
+# if they are assigned the same sky coordinates as those still in the range.  This is particularly problematic
+# for MIRI MRS Ch1 where point sources can be near the edge of the FOV.
+def drl_map(instrument_name,flux_os2d, x_os2d, y_os2d, x, y, ra, dec, wave_all, slice_no_all, dwave_all, corner_coord_all, osfac=3):
     if (instrument_name == 'MIRI'):
         xsize, ysize = 1032, 1024
         xosize, yosize = xsize*osfac, ysize
@@ -680,36 +705,36 @@ def drl_map(instrument_name,flux_os2d, x_os2d, y_os2d, x, y, ra, dec, wave_all, 
                 ystart = int(jj/osfac)-osfac
                 ystop = int(jj/osfac)+osfac
                 if (np.nansum(ra2d[ystart:ystop,ii]) != 0):
-                    ra_os2d[jj,ii] = np.interp(y_os2d[jj,ii], y2d[ystart:ystop,ii], ra2d[ystart:ystop,ii])
-                    dec_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], dec2d[ystart:ystop, ii])
-                    wave_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], wave2d[ystart:ystop, ii])
-                    slice_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], slice2d[ystart:ystop, ii])
-                    dwave_os2d[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], dwave2d[ystart:ystop, ii])
-                    cc_os2d0[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d0[ystart:ystop, ii])
-                    cc_os2d1[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d1[ystart:ystop, ii])
-                    cc_os2d2[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d2[ystart:ystop, ii])
-                    cc_os2d3[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d3[ystart:ystop, ii])
-                    cc_os2d4[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d4[ystart:ystop, ii])
-                    cc_os2d5[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d5[ystart:ystop, ii])
-                    cc_os2d6[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d6[ystart:ystop, ii])
-                    cc_os2d7[jj, ii] = np.interp(y_os2d[jj, ii], y2d[ystart:ystop, ii], cc2d7[ystart:ystop, ii])
+                    ra_os2d[jj,ii] = interp1d(y2d[ystart:ystop,ii], ra2d[ystart:ystop,ii],fill_value='extrapolate')(y_os2d[jj,ii])
+                    dec_os2d[jj, ii] = interp1d(y2d[ystart:ystop, ii], dec2d[ystart:ystop, ii],fill_value='extrapolate')(y_os2d[jj,ii])
+                    wave_os2d[jj, ii] = interp1d(y2d[ystart:ystop, ii], wave2d[ystart:ystop, ii],fill_value='extrapolate')(y_os2d[jj,ii])
+                    slice_os2d[jj, ii] = interp1d(y2d[ystart:ystop, ii], slice2d[ystart:ystop, ii],fill_value='extrapolate')(y_os2d[jj,ii])
+                    dwave_os2d[jj, ii] = interp1d(y2d[ystart:ystop, ii], dwave2d[ystart:ystop, ii],fill_value='extrapolate')(y_os2d[jj,ii])
+                    cc_os2d0[jj, ii] = interp1d(y2d[ystart:ystop, ii], cc2d0[ystart:ystop, ii],fill_value='extrapolate')(y_os2d[jj,ii])
+                    cc_os2d1[jj, ii] = interp1d(y2d[ystart:ystop, ii], cc2d1[ystart:ystop, ii],fill_value='extrapolate')(y_os2d[jj,ii])
+                    cc_os2d2[jj, ii] = interp1d(y2d[ystart:ystop, ii], cc2d2[ystart:ystop, ii],fill_value='extrapolate')(y_os2d[jj,ii])
+                    cc_os2d3[jj, ii] = interp1d(y2d[ystart:ystop, ii], cc2d3[ystart:ystop, ii],fill_value='extrapolate')(y_os2d[jj,ii])
+                    cc_os2d4[jj, ii] = interp1d(y2d[ystart:ystop, ii], cc2d4[ystart:ystop, ii],fill_value='extrapolate')(y_os2d[jj,ii])
+                    cc_os2d5[jj, ii] = interp1d(y2d[ystart:ystop, ii], cc2d5[ystart:ystop, ii],fill_value='extrapolate')(y_os2d[jj,ii])
+                    cc_os2d6[jj, ii] = interp1d(y2d[ystart:ystop, ii], cc2d6[ystart:ystop, ii],fill_value='extrapolate')(y_os2d[jj,ii])
+                    cc_os2d7[jj, ii] = interp1d(y2d[ystart:ystop, ii], cc2d7[ystart:ystop, ii],fill_value='extrapolate')(y_os2d[jj,ii])
             elif (instrument_name == 'MIRI'):
                 xstart = int(ii/osfac)-osfac
                 xstop = int(ii/osfac)+osfac
                 if (np.nansum(ra2d[jj,xstart:xstop]) != 0):
-                    ra_os2d[jj,ii] = np.interp(x_os2d[jj,ii], x2d[jj,xstart:xstop], ra2d[jj,xstart:xstop])
-                    dec_os2d[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], dec2d[jj,xstart:xstop])
-                    wave_os2d[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], wave2d[jj,xstart:xstop])
-                    slice_os2d[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], slice2d[jj,xstart:xstop])
-                    dwave_os2d[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], dwave2d[jj,xstart:xstop])
-                    cc_os2d0[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], cc2d0[jj,xstart:xstop])
-                    cc_os2d1[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], cc2d1[jj,xstart:xstop])
-                    cc_os2d2[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], cc2d2[jj,xstart:xstop])
-                    cc_os2d3[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], cc2d3[jj,xstart:xstop])
-                    cc_os2d4[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], cc2d4[jj,xstart:xstop])
-                    cc_os2d5[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], cc2d5[jj,xstart:xstop])
-                    cc_os2d6[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], cc2d6[jj,xstart:xstop])
-                    cc_os2d7[jj, ii] = np.interp(x_os2d[jj, ii], x2d[jj,xstart:xstop], cc2d7[jj,xstart:xstop])
+                    ra_os2d[jj,ii] = interp1d(x2d[jj,xstart:xstop], ra2d[jj,xstart:xstop],fill_value='extrapolate')(x_os2d[jj,ii])
+                    dec_os2d[jj, ii] = interp1d(x2d[jj,xstart:xstop], dec2d[jj,xstart:xstop],fill_value='extrapolate')(x_os2d[jj,ii])
+                    wave_os2d[jj, ii] = interp1d(x2d[jj,xstart:xstop], wave2d[jj,xstart:xstop],fill_value='extrapolate')(x_os2d[jj,ii])
+                    slice_os2d[jj, ii] = interp1d(x2d[jj,xstart:xstop], slice2d[jj,xstart:xstop],fill_value='extrapolate')(x_os2d[jj,ii])
+                    dwave_os2d[jj, ii] = interp1d(x2d[jj,xstart:xstop], dwave2d[jj,xstart:xstop],fill_value='extrapolate')(x_os2d[jj,ii])
+                    cc_os2d0[jj, ii] = interp1d(x2d[jj,xstart:xstop], cc2d0[jj,xstart:xstop],fill_value='extrapolate')(x_os2d[jj,ii])
+                    cc_os2d1[jj, ii] = interp1d(x2d[jj,xstart:xstop], cc2d1[jj,xstart:xstop],fill_value='extrapolate')(x_os2d[jj,ii])
+                    cc_os2d2[jj, ii] = interp1d(x2d[jj,xstart:xstop], cc2d2[jj,xstart:xstop],fill_value='extrapolate')(x_os2d[jj,ii])
+                    cc_os2d3[jj, ii] = interp1d(x2d[jj,xstart:xstop], cc2d3[jj,xstart:xstop],fill_value='extrapolate')(x_os2d[jj,ii])
+                    cc_os2d4[jj, ii] = interp1d(x2d[jj,xstart:xstop], cc2d4[jj,xstart:xstop],fill_value='extrapolate')(x_os2d[jj,ii])
+                    cc_os2d5[jj, ii] = interp1d(x2d[jj,xstart:xstop], cc2d5[jj,xstart:xstop],fill_value='extrapolate')(x_os2d[jj,ii])
+                    cc_os2d6[jj, ii] = interp1d(x2d[jj,xstart:xstop], cc2d6[jj,xstart:xstop],fill_value='extrapolate')(x_os2d[jj,ii])
+                    cc_os2d7[jj, ii] = interp1d(x2d[jj,xstart:xstop], cc2d7[jj,xstart:xstop],fill_value='extrapolate')(x_os2d[jj,ii])
             else:
                 print('Unknown instrument!')
 
@@ -1328,7 +1353,7 @@ class IFUCubeData:
                 log.info(f"Cube covers grating, filter: {this_gwa}, {this_fwa}")
 
     # ________________________________________________________________________________
-    def build_ifucube(self,oversample=False,osfac=2,threshsig=10,slopelim=0.1,psfoptimal=False):
+    def build_ifucube(self,oversample=False,osfac=3,threshsig=10,slopelim=0.1,psfoptimal=False):
         """
         Create an IFU cube.
 
@@ -2404,7 +2429,7 @@ class IFUCubeData:
         self.print_cube_geometry()
 
     # ________________________________________________________________________________
-    def map_detector_to_outputframe(self, this_par1, input_model, oversample=False, osfac=2, threshsig=10, slopelim=0.1,psfoptimal=False):
+    def map_detector_to_outputframe(self, this_par1, input_model, oversample=False, osfac=3, threshsig=10, slopelim=0.1,psfoptimal=False):
         """
         Loop over a file and map the detector pixels to the output cube.
 
