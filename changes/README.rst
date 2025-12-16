@@ -37,6 +37,7 @@ Stage 1
 - ``<PR#>.dark_current.rst``
 - ``<PR#>.charge_migration.rst``
 - ``<PR#>.jump.rst``
+- ``<PR#>.picture_frame.rst``
 - ``<PR#>.clean_flicker_noise.rst``
 - ``<PR#>.ramp_fitting.rst``
 - ``<PR#>.gain_scale.rst``
@@ -47,7 +48,6 @@ Stage 2
 - ``<PR#>.assign_wcs.rst``
 - ``<PR#>.badpix_selfcal.rst``
 - ``<PR#>.msaflagopen.rst``
-- ``<PR#>.nsclean.rst``
 - ``<PR#>.imprint.rst``
 - ``<PR#>.background.rst``
 - ``<PR#>.extract_2d.rst``

@@ -7,11 +7,11 @@ import pytest
 from astropy.io import fits
 from gwcs.wcstools import grid_from_bounding_box
 from numpy.testing import assert_allclose
+from stcal.alignment.util import compute_scale
 from stcal.resample.utils import build_driz_weight, compute_mean_pixel_area
 from stdatamodels.jwst.datamodels import CubeModel, ImageModel, MultiSlitModel, dqflags
 
 from jwst.assign_wcs import AssignWcsStep
-from jwst.assign_wcs.util import compute_scale
 from jwst.datamodels import ModelContainer, ModelLibrary
 from jwst.exp_to_source import multislit_to_container
 from jwst.extract_2d import Extract2dStep
@@ -20,7 +20,6 @@ from jwst.resample.resample import input_jwst_model_to_dict
 from jwst.resample.resample_spec import ResampleSpec, compute_spectral_pixel_scale
 from jwst.resample.resample_step import GOOD_BITS
 from jwst.resample.resample_utils import load_custom_wcs
-from jwst.tests.helpers import _help_pytest_warns
 
 _FLT32_EPS = np.finfo(np.float32).eps
 
@@ -966,7 +965,7 @@ def test_resample_variance_context_disable(
 
 
 @pytest.mark.parametrize("shape", [(0,), (10, 1)])
-def test_resample_undefined_variance(nircam_rate, shape):
+def test_resample_undefined_variance(caplog, nircam_rate, shape):
     """Test that resampled variance and error arrays are computed properly"""
     im = AssignWcsStep.call(nircam_rate)
     im.var_rnoise = np.ones(shape, dtype=im.var_rnoise.dtype.type)
@@ -975,11 +974,8 @@ def test_resample_undefined_variance(nircam_rate, shape):
     im.meta.filename = "foo.fits"
     c = ModelLibrary([im])
 
-    with (
-        _help_pytest_warns(),
-        pytest.warns(RuntimeWarning, match="'var_rnoise' array not available"),
-    ):
-        result = ResampleStep.call(c, blendheaders=False)
+    result = ResampleStep.call(c, blendheaders=False)
+    assert "'var_rnoise' array not available" in caplog.text
 
     # no valid variance - output error and variance are all NaN
     assert_allclose(result.err, np.nan)

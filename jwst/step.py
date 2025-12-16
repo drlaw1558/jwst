@@ -1,5 +1,4 @@
 from jwst.ami.ami_analyze_step import AmiAnalyzeStep
-from jwst.ami.ami_average_step import AmiAverageStep
 from jwst.ami.ami_normalize_step import AmiNormalizeStep
 from jwst.assign_mtwcs.assign_mtwcs_step import AssignMTWcsStep
 from jwst.assign_wcs.assign_wcs_step import AssignWcsStep
@@ -33,11 +32,11 @@ from jwst.linearity.linearity_step import LinearityStep
 from jwst.master_background.master_background_mos_step import MasterBackgroundMosStep
 from jwst.master_background.master_background_step import MasterBackgroundStep
 from jwst.msaflagopen.msaflagopen_step import MSAFlagOpenStep
-from jwst.nsclean.nsclean_step import NSCleanStep
 from jwst.outlier_detection.outlier_detection_step import OutlierDetectionStep
 from jwst.pathloss.pathloss_step import PathLossStep
 from jwst.persistence.persistence_step import PersistenceStep
 from jwst.photom.photom_step import PhotomStep
+from jwst.picture_frame.picture_frame_step import PictureFrameStep
 from jwst.pixel_replace.pixel_replace_step import PixelReplaceStep
 from jwst.ramp_fitting.ramp_fit_step import RampFitStep
 from jwst.refpix.refpix_step import RefPixStep
@@ -62,7 +61,6 @@ from jwst.white_light.white_light_step import WhiteLightStep
 
 __all__ = [
     "AmiAnalyzeStep",
-    "AmiAverageStep",
     "AmiNormalizeStep",
     "AssignMTWcsStep",
     "AssignWcsStep",
@@ -95,11 +93,11 @@ __all__ = [
     "MasterBackgroundStep",
     "MasterBackgroundMosStep",
     "MSAFlagOpenStep",
-    "NSCleanStep",
     "OutlierDetectionStep",
     "PathLossStep",
     "PersistenceStep",
     "PhotomStep",
+    "PictureFrameStep",
     "PixelReplaceStep",
     "RampFitStep",
     "RefPixStep",

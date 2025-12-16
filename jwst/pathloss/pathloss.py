@@ -6,8 +6,9 @@ import math
 import numpy as np
 import stdatamodels.jwst.datamodels as datamodels
 from gwcs import wcstools
+from stcal.alignment.util import compute_scale
 
-from jwst.assign_wcs import nirspec, util
+from jwst.assign_wcs import nirspec
 from jwst.lib.pipe_utils import match_nans_and_flags
 from jwst.lib.wcs_utils import get_wavelengths
 
@@ -422,7 +423,7 @@ def do_correction(
         corrections = do_correction_ifu(
             output_model, pathloss_model, inverse, source_type, correction_pars
         )
-    elif exp_type == "MIR_LRS-FIXEDSLIT":
+    elif exp_type in ["MIR_LRS-FIXEDSLIT", "MIR_WFSS"]:
         # only apply correction to LRS fixed-slit if target is point source
         if is_pointsource(output_model.meta.target.source_type):
             corrections = do_correction_lrs(output_model, pathloss_model, user_slit_loc)
@@ -1234,7 +1235,7 @@ def _corrections_for_lrs(data, pathloss, user_slit_loc):
         # +/-0.255 arcsec. Hence, the xcenter coordinate remains the same.
         ra, dec, wav = data.meta.wcs(offset_1, offset_2)
         location = (ra, dec, wav)
-        scale_degrees = util.compute_scale(
+        scale_degrees = compute_scale(
             data.meta.wcs, location, disp_axis=data.meta.wcsinfo.dispersion_direction
         )
         scale_arcsec = scale_degrees * 3600.0

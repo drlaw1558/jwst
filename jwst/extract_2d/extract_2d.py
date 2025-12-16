@@ -12,13 +12,15 @@ log = logging.getLogger(__name__)
 
 __all__ = ["extract2d"]
 
-slitless_modes = ["NIS_WFSS", "NRC_WFSS", "NRC_TSGRISM"]
+slitless_modes = ["NIS_WFSS", "NRC_WFSS", "NRC_TSGRISM", "MIR_WFSS"]
 
 
 def extract2d(
     input_model,
     slit_names=None,
     source_ids=None,
+    source_ra=None,
+    source_dec=None,
     reference_files=None,
     grism_objects=None,
     tsgrism_extract_height=None,
@@ -38,6 +40,10 @@ def extract2d(
         Slit names to be processed.
     source_ids : list containing strings or ints
         Source ids to be processed.
+    source_ra : list[float]
+        Source right ascensions to be processed (has effect for WFSS modes only)
+    source_dec : list[float]
+        Source declinations to be processed (has effect for WFSS modes only)
     reference_files : dict
         Reference files.
     grism_objects : list
@@ -97,11 +103,13 @@ def extract2d(
                 grism_objects=grism_objects,
                 reference_files=reference_files,
                 extract_orders=extract_orders,
+                source_ids=source_ids,
+                source_ra=source_ra,
+                source_dec=source_dec,
                 mmag_extract=mmag_extract,
                 wfss_extract_half_height=wfss_extract_half_height,
                 nbright=nbright,
             )
-
     else:
         log.info(f"EXP_TYPE {exp_type} not supported for extract 2D")
         output_model = input_model.copy()
