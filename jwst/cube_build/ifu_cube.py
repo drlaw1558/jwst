@@ -415,23 +415,25 @@ def drl_oversample(model, writeout=True, osfac=3, slstart=0, slstop=30, lrange=5
                     # Plot the spline model
                     if (ii == iiplot):
                     #if (ii % 10 == 0):
+                        mmtoarc = 0.25  # 12mm is about 3 arcsec
                         rc('axes', linewidth=2)
                         fig, ax = plt.subplots(1, 1, figsize=(6, 5), dpi=150)
                         ax.tick_params(axis='both', which='major', labelsize=12)
 
                         for jj in range(lstart, lstop):
-                            plt.plot(1e3*thisalpha[:, jj], thisdata_scaled[:, jj], '.', ms=12, color='black')
-                        plt.plot(1e3*thisalpha[:, lstart], thisdata_scaled[:, lstart], '.', ms=10, color='black',label='Samples')
+                            plt.plot(1e3*thisalpha[:, jj]*mmtoarc, thisdata_scaled[:, jj], '.', ms=12, color='black')
+                        plt.plot(1e3*thisalpha[:, lstart]*mmtoarc, thisdata_scaled[:, lstart], '.', ms=10, color='black',label='Samples')
                         # And the data values in the first column
-                        plt.plot(1e3*thisalpha[:, ii], thisdata_scaled[:, ii], 's', ms=10, color='tab:green', label='Column data')
+                        plt.plot(1e3*thisalpha[:, ii]*mmtoarc, thisdata_scaled[:, ii], 's', ms=10, color='tab:green', label='Column data')
                         prange=np.where((alphavec > np.nanmin(thisalpha[:,ii]))&(alphavec < np.nanmax(thisalpha[:,ii])))
-                        plt.plot(1e3*alphavec[prange], datafit[prange], linewidth=2,label='Bspline Fit',color='tab:orange')
-                        plt.title('Column '+str(ii))
-                        plt.xlabel(r'Along-slice coordinate (mm)',fontsize=14)
+                        plt.plot(1e3*alphavec[prange]*mmtoarc, datafit[prange], linewidth=2,label='Bspline Fit',color='tab:orange')
+                        #plt.title('Column '+str(ii))
+                        plt.xlabel(r'Along-slice coordinate (arcsec)',fontsize=14)
                         plt.ylabel('Scaled Intensity',fontsize=14)
                         plt.grid()
                         plt.legend(fontsize=14)
                         plt.ylim(-0.05,1.2*np.nanmax(datafit[prange]))
+                        #plt.xlim(-1.5,0)
                         plt.tight_layout()
                         plt.savefig('temp.pdf')
                         plt.show()
@@ -536,18 +538,19 @@ def drl_oversample(model, writeout=True, osfac=3, slstart=0, slstop=30, lrange=5
                     #    pdb.set_trace()
 
                     if (ii == iiplot):
+                        mmtoarc=0.25 # 12mm is about 3 arcsec
                         rc('axes', linewidth=2)
                         fig, ax = plt.subplots(1, 1, figsize=(6, 5), dpi=150)
                         ax.tick_params(axis='both', which='major', labelsize=12)
-                        plt.plot(thisalpha[:, ii]*1e3, thisdata[:, ii], 's', ms=10, color='tab:green',label='Original data')
-                        plt.plot(tempalpha*1e3,flux_os_linear[newy, ii],'d',ms=10,color='tab:orange',label='Linear Oversample')
+                        plt.plot(thisalpha[:, ii]*1e3*mmtoarc, thisdata[:, ii], 's', ms=10, color='tab:green',label='Original data')
+                        plt.plot(tempalpha*1e3*mmtoarc,flux_os_linear[newy, ii],'d',ms=10,color='tab:orange',label='Linear Oversample')
                         #plt.plot(tempalpha, flux_os_linear[newy, ii], color='tab:orange')
-                        plt.plot(tempalpha*1e3, flux_os_bspline_full[newy, ii], 'o', ms=10, color='tab:blue', label='Spline Oversample')
+                        plt.plot(tempalpha*1e3*mmtoarc, flux_os_bspline_full[newy, ii], 'o', ms=10, color='tab:blue', label='Spline Oversample')
                         #plt.plot(tempalpha, flux_os_bspline_full[newy, ii], color='tab:blue')
-                        plt.plot(alpha_forplots*1e3,fit_forplots,color='black',zorder=0,label='Spline Model')
-                        plt.xlabel(r'Along-slice coordinate (mm)', fontsize=14)
+                        plt.plot(alpha_forplots*1e3*mmtoarc,fit_forplots,color='black',zorder=0,label='Spline Model')
+                        plt.xlabel(r'Along-slice coordinate (arcsec)', fontsize=14)
                         plt.ylabel('Intensity', fontsize=14)
-                        #plt.xlim(-4.5,-1)
+                        plt.xlim(-4.5*mmtoarc,-1*mmtoarc)
                         plt.grid()
                         plt.legend()
                         plt.show()
