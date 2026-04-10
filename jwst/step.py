@@ -1,3 +1,4 @@
+from jwst.adaptive_trace_model.adaptive_trace_model_step import AdaptiveTraceModelStep
 from jwst.ami.ami_analyze_step import AmiAnalyzeStep
 from jwst.ami.ami_normalize_step import AmiNormalizeStep
 from jwst.assign_mtwcs.assign_mtwcs_step import AssignMTWcsStep
@@ -52,6 +53,7 @@ from jwst.spectral_leak.spectral_leak_step import SpectralLeakStep
 from jwst.srctype.srctype_step import SourceTypeStep
 from jwst.straylight.straylight_step import StraylightStep
 from jwst.superbias.superbias_step import SuperBiasStep
+from jwst.targ_centroid.targ_centroid_step import TargCentroidStep
 from jwst.tso_photometry.tso_photometry_step import TSOPhotometryStep
 from jwst.tweakreg.tweakreg_step import TweakRegStep
 from jwst.wavecorr.wavecorr_step import WavecorrStep
@@ -60,6 +62,7 @@ from jwst.wfss_contam.wfss_contam_step import WfssContamStep
 from jwst.white_light.white_light_step import WhiteLightStep
 
 __all__ = [
+    "AdaptiveTraceModelStep",
     "AmiAnalyzeStep",
     "AmiNormalizeStep",
     "AssignMTWcsStep",
@@ -113,6 +116,7 @@ __all__ = [
     "SpectralLeakStep",
     "StraylightStep",
     "SuperBiasStep",
+    "TargCentroidStep",
     "TSOPhotometryStep",
     "ChargeMigrationStep",
     "TweakRegStep",

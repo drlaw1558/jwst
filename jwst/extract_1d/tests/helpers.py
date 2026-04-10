@@ -1,5 +1,7 @@
+import gwcs
 import numpy as np
 import stdatamodels.jwst.datamodels as dm
+from astropy.modeling.models import Identity, Mapping, Scale, Shift
 
 from jwst.assign_wcs.util import wcs_bbox_from_shape
 from jwst.datamodels.utils.tso_multispec import make_tso_specmodel
@@ -15,6 +17,7 @@ __all__ = [
     "mock_miri_lrs_fs_func",
     "mock_miri_ifu_func",
     "mock_miri_wfss_l2",
+    "mock_nircam_dhs",
     "mock_nis_wfss_l2",
     "mock_nis_wfss_l3",
     "mock_niriss_soss_func",
@@ -27,170 +30,113 @@ __all__ = [
 
 def simple_wcs_func():
     """
-    Mock a horizontal dispersion WCS with a simple callable function.
-
-    Some other expected WCS attributes are also mocked with placeholder values:
-       - bounding_box
-       - get_transform
-       - available_frames
+    Mock a simple horizontal dispersion WCS.
 
     Returns
     -------
-    callable
-        A function that will return mock values for RA, Dec, wave,
-        given x and y coordinates.
+    wcs : `~gwcs.wcs.WCS`
+        The WCS object.
     """
     shape = (50, 50)
     xcenter = shape[1] // 2.0
 
-    def simple_wcs_function(x, y):  # noqa: ARG001
-        crpix1 = xcenter
-        crpix3 = 1.0
-        cdelt1 = 0.1
-        cdelt2 = 0.1
-        cdelt3 = 0.01
+    cdelt1 = 0.1
+    cdelt2 = 1e-7
+    cdelt3 = 0.01
 
-        crval1 = 45.0
-        crval2 = 45.0
-        crval3 = 7.5
+    crval1 = 45.0
+    crval2 = 45.1
+    crval3 = 7.5
 
-        wave = (x + 1 - crpix3) * cdelt3 + crval3
-        ra = (x + 1 - crpix1) * cdelt1 + crval1
-        dec = np.full_like(ra, crval2 + 1 * cdelt2)
+    ra = Shift(1 - xcenter) | Scale(cdelt1) | Shift(crval1)
+    dec = Scale(cdelt2) | Shift(crval2)
+    wave = Scale(cdelt3) | Shift(crval3)
+    det2slit = Mapping((1, 1, 0), n_inputs=2) | Identity(2) & wave
+    slit2world = ra & dec & Identity(1)
 
-        return ra, dec, wave
+    input_frame = gwcs.Frame2D(name="detector")
+    slit_frame = gwcs.Frame2D(name="slit_frame")
+    output_frame = gwcs.Frame2D(name="world")
+    pipeline = [(input_frame, det2slit), (slit_frame, slit2world), (output_frame, None)]
+    wcs = gwcs.WCS(pipeline)
 
     # Add a bounding box
-    simple_wcs_function.bounding_box = wcs_bbox_from_shape(shape)
+    wcs.bounding_box = wcs_bbox_from_shape(shape)
 
-    # Define a simple transform
-    def get_transform(*args, **kwargs):  # noqa: ARG001
-        def return_results(*args, **kwargs):  # noqa: ARG001
-            if len(args) == 2:
-                try:
-                    zeros = np.zeros(args[0].shape)
-                    wave, _ = np.meshgrid(args[0], args[1])
-                except AttributeError:
-                    zeros = 0.0
-                    wave = args[0]
-                return zeros, zeros, wave
-            if len(args) == 3:
-                try:
-                    nx = len(args[0])
-                    pix = np.arange(nx)
-                    trace = np.ones(nx)
-                except TypeError:
-                    pix = 0
-                    trace = 1.0
-                return pix, trace
-
-        return return_results
-
-    simple_wcs_function.get_transform = get_transform
-    simple_wcs_function.available_frames = []
-
-    return simple_wcs_function
+    return wcs
 
 
 def simple_wcs_transpose_func():
     """
-    Mock a vertical dispersion WCS with a simple callable function.
-
-    Some other expected WCS attributes are also mocked with placeholder values:
-       - bounding_box
-       - get_transform
-       - backward_transform
-       - available_frames
+    Mock a simple vertical dispersion WCS.
 
     Returns
     -------
-    callable
-        A function that will return mock values for RA, Dec, wave,
-        given x and y coordinates.
+    wcs : `~gwcs.wcs.WCS`
+        The WCS object.
     """
     shape = (50, 50)
-    ycenter = shape[0] // 2.0
+    xcenter = shape[1] // 2.0
 
-    def simple_wcs_function(x, y):  # noqa: ARG001
-        crpix2 = ycenter
-        crpix3 = 1.0
-        cdelt1 = 0.1
-        cdelt2 = 0.1
-        cdelt3 = -0.01
+    cdelt1 = 0.1
+    cdelt2 = 1e-7
+    cdelt3 = -0.01
 
-        crval1 = 45.0
-        crval2 = 45.0
-        crval3 = 7.5
+    crval1 = 45.0
+    crval2 = 45.1
+    crval3 = 7.5
 
-        wave = (y + 1 - crpix3) * cdelt3 + crval3
-        ra = (y + 1 - crpix2) * cdelt1 + crval1
-        dec = np.full_like(ra, crval2 + 1 * cdelt2)
+    ra = Shift(1 - xcenter) | Scale(cdelt1) | Shift(crval1)
+    dec = Scale(cdelt2) | Shift(crval2)
+    wave = Scale(cdelt3) | Shift(crval3)
+    mapping = Mapping((0, 0, 1), n_inputs=2)
+    transform = mapping | ra & dec & wave
 
-        return ra, dec, wave
+    input_frame = gwcs.Frame2D(name="detector")
+    output_frame = gwcs.Frame2D(name="world")
+    wcs = gwcs.WCS(transform, input_frame=input_frame, output_frame=output_frame)
 
     # Add a bounding box
-    simple_wcs_function.bounding_box = wcs_bbox_from_shape(shape)
+    wcs.bounding_box = wcs_bbox_from_shape(shape)
 
-    # Mock a simple backward transform
-    def backward_transform(*args, **kwargs):  # noqa: ARG001
-        try:
-            nx = len(args[0])
-            pix = np.arange(nx)
-            trace = np.ones(nx)
-        except TypeError:
-            pix = 0.0
-            trace = 1.0
-        return trace, pix
-
-    # Mock a simple forward transform, for mocking a v2v3 frame
-    def get_transform(*args, **kwargs):  # noqa: ARG001
-        def return_results(*args, **kwargs):  # noqa: ARG001
-            return 1.0, 1.0, 1.0
-
-        return return_results
-
-    simple_wcs_function.get_transform = get_transform
-    simple_wcs_function.backward_transform = backward_transform
-    simple_wcs_function.available_frames = []
-
-    return simple_wcs_function
+    return wcs
 
 
 def simple_wcs_ifu_func():
     """
-    Mock an IFU WCS with a simple callable function.
-
-    The bounding_box attribute is also mocked with a placeholder value.
+    Mock a simple IFU WCS.
 
     Returns
     -------
-    callable
-        A function that will return mock values for RA, Dec, wave,
-        given x and y coordinates.
+    wcs : `~gwcs.wcs.WCS`
+        The WCS object.
     """
     shape = (10, 50, 50)
     xcenter = shape[1] // 2.0
 
-    def simple_wcs_function(x, y, z):  # noqa: ARG001
-        crpix1 = xcenter
-        crpix3 = 1.0
-        cdelt1 = 0.1
-        cdelt2 = 0.1
-        cdelt3 = 0.01
+    cdelt1 = 0.1
+    cdelt2 = 1e-7
+    cdelt3 = -0.01
 
-        crval1 = 45.0
-        crval2 = 45.0
-        crval3 = 7.5
+    crval1 = 45.0
+    crval2 = 45.1
+    crval3 = 7.5
 
-        wave = (z + 1 - crpix3) * cdelt3 + crval3
-        ra = (z + 1 - crpix1) * cdelt1 + crval1
-        dec = np.full_like(ra, crval2 + 1 * cdelt2)
+    ra = Shift(1 - xcenter) | Scale(cdelt1) | Shift(crval1)
+    dec = Scale(cdelt2) | Shift(crval2)
+    wave = Scale(cdelt3) | Shift(crval3)
+    mapping = Mapping((0, 1, 2), n_inputs=3)
+    transform = mapping | ra & dec & wave
 
-        return ra, dec, wave[::-1]
+    input_frame = gwcs.CoordinateFrame(
+        name="detector", naxes=3, axes_order=(0, 1, 2), axes_type=["SPATIAL", "SPATIAL", "SPECTRAL"]
+    )
+    output_frame = gwcs.CoordinateFrame(
+        name="world", naxes=3, axes_order=(0, 1, 2), axes_type=["SPATIAL", "SPATIAL", "SPECTRAL"]
+    )
+    wcs = gwcs.WCS(transform, input_frame=input_frame, output_frame=output_frame)
 
-    simple_wcs_function.bounding_box = wcs_bbox_from_shape(shape)
-
-    return simple_wcs_function
+    return wcs
 
 
 def mock_nirspec_fs_one_slit_func():
@@ -214,6 +160,8 @@ def mock_nirspec_fs_one_slit_func():
     model.meta.exposure.type = "NRS_FIXEDSLIT"
     model.meta.subarray.name = "ALLSLITS"
     model.source_type = "EXTENDED"
+    model.source_xpos = 0.0
+    model.source_ypos = 0.0
 
     model.meta.wcsinfo.dispersion_direction = 1
     model.meta.wcs = simple_wcs_func()
@@ -416,12 +364,14 @@ def mock_miri_lrs_fs_func():
     model.meta.subarray.name = "FULL"
     model.meta.target.source_type = "EXTENDED"
     model.meta.dither.dithered_ra = 45.0
-    model.meta.dither.dithered_ra = 45.0
+    model.meta.dither.dithered_dec = 45.0
 
     model.meta.wcsinfo.dispersion_direction = 2
     model.meta.wcs = simple_wcs_transpose_func()
 
     model.data = np.arange(50 * 50, dtype=float).reshape((50, 50))
+    model.dq = np.zeros((50, 50), dtype=np.uint32)
+    model.err = model.data * 0.02
     model.var_poisson = model.data * 0.02
     model.var_rnoise = model.data * 0.02
     model.var_flat = model.data * 0.05
@@ -500,6 +450,85 @@ def mock_miri_ifu_func():
     return model
 
 
+def mock_nircam_dhs():
+    """
+    Mock a substripe MultiSlitModel in NIRCam DHS TSGRISM mode.
+
+    Returns
+    -------
+    MultiSlitModel
+        The mock model.
+    """
+    model = dm.MultiSlitModel()
+    model.meta.instrument.name = "NIRCAM"
+    model.meta.instrument.detector = "NRCA1"
+    model.meta.observation.date = "2026-02-18"
+    model.meta.observation.time = "06:24:45.569"
+    model.meta.exposure.type = "NRC_TSGRISM"
+    intend = 3
+    model.meta.exposure.integration_start = 1
+    model.meta.exposure.integration_end = intend
+    model.meta.exposure.nints = intend
+    integrations = [
+        (
+            1,
+            59729.04367729,
+            59729.04378181,
+            59729.04388632,
+            59729.04731706,
+            59729.04742158,
+            59729.04752609,
+        ),
+        (
+            2,
+            59729.04389677,
+            59729.04400128,
+            59729.04410579,
+            59729.04753654,
+            59729.04764105,
+            59729.04774557,
+        ),
+        (
+            3,
+            59729.04411625,
+            59729.04422076,
+            59729.04432527,
+            59729.04775602,
+            59729.04786053,
+            59729.04796504,
+        ),
+    ]
+
+    integration_table = np.array(
+        integrations,
+        dtype=[
+            ("integration_number", "i4"),
+            ("int_start_MJD_UTC", "f8"),
+            ("int_mid_MJD_UTC", "f8"),
+            ("int_end_MJD_UTC", "f8"),
+            ("int_start_BJD_TDB", "f8"),
+            ("int_mid_BJD_TDB", "f8"),
+            ("int_end_BJD_TDB", "f8"),
+        ],
+    )
+    model.int_times = integration_table
+
+    for _ in range(2):
+        submodel = dm.SlitModel()
+        submodel.meta.wcsinfo.dispersion_direction = 1
+        submodel.meta.photometry.pixelarea_steradians = 1.0
+        submodel.meta.wcs = simple_wcs_func()
+
+        submodel.data = np.arange(intend * 50 * 50, dtype=float).reshape((intend, 50, 50))
+        submodel.var_poisson = submodel.data * 0.02
+        submodel.var_rnoise = submodel.data * 0.02
+        submodel.var_flat = submodel.data * 0.05
+        submodel.update(model)
+        submodel.int_times = integration_table
+        model.slits.append(submodel)
+    return model
+
+
 def mock_nis_wfss_l2():
     """
     Mock 3 slits in NIRISS WFSS mode, level 2 style.
@@ -537,6 +566,7 @@ def mock_nis_wfss_l2():
     for i in range(nslit):
         slit = slit0.copy()
         slit.name = str(i + 1)
+        slit.source_id = 0
         slit.meta.exposure.type = "NIS_WFSS"
         model.slits.append(slit)
 
@@ -716,7 +746,7 @@ def make_spec_model(name="slit1", value=1.0):
     b_var_flat = np.zeros_like(flux)
     npixels = np.full(20, 10)
 
-    spec_dtype = dm.SpecModel().spec_table.dtype
+    spec_dtype = dm.SpecModel().get_dtype("spec_table")
     otab = np.array(
         list(
             zip(

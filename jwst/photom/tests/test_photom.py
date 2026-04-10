@@ -125,12 +125,12 @@ def mk_soss_spec(settings, speclen):
                         [np.linspace(0.6, 4.0, speclen[i])]
                         + [
                             np.ones(speclen[i])
-                            for _ in range(len(SpecModel().spec_table.dtype) - 1)
+                            for _ in range(len(SpecModel().get_dtype("spec_table")) - 1)
                         ]
                     )
                 )
             ),
-            dtype=SpecModel().spec_table.dtype,
+            dtype=SpecModel().get_dtype("spec_table"),
         )
         specmodel = datamodels.SpecModel(spec_table=otab)
         specmodel.spectral_order = inspec["order"]
@@ -707,7 +707,7 @@ def create_photom_niriss_wfss(min_wl=1.0, max_wl=5.0, min_r=8.0, max_r=9.0):
         dtype=dtype,
     )
     ftab = datamodels.NisWfssPhotomModel(phot_table=reftab)
-
+    ftab.phot_unit = "MJy micron s / (DN sr)"
     return ftab
 
 
@@ -1162,7 +1162,7 @@ def create_photom_nircam_wfss(min_wl=2.4, max_wl=5.0, min_r=8.0, max_r=9.0):
     )
 
     ftab = datamodels.NrcWfssPhotomModel(phot_table=reftab)
-
+    ftab.phot_unit = "Angstrom MJy s / (DN sr)"
     return ftab
 
 
@@ -1486,15 +1486,6 @@ def test_nirspec_msa():
     assert np.all(result)
 
 
-""" Skip this test because it would require a realistic wcs.
-def test_nirspec_ifu():
-
-    input_model = create_input("NIRSPEC", "NRS1", "NRS_IFU",
-                               filter="F170LP", grating="G235M")
-    ds = photom.DataSet(input_model)
-"""
-
-
 def test_niriss_wfss():
     """Test the calc_niriss method of the DataSet class, WFSS data."""
     input_model = create_input("NIRISS", "NIS", "NIS_WFSS", filter_used="GR150R", pupil="F140M")
@@ -1508,6 +1499,8 @@ def test_niriss_wfss():
         input_data = slit.data  # this is from save_input
         output = ds.input.slits[k].data  # ds.input is the output
         sp_order = slit.meta.wcsinfo.spectral_order
+
+        # retrieve relevant photom table data
         rownum = find_row_in_ftab(
             save_input, ftab, ["filter", "pupil"], slitname=None, order=sp_order
         )
@@ -1519,8 +1512,15 @@ def test_niriss_wfss():
         ix = shape[1] // 2
         iy = shape[0] // 2
         wl = slit.wavelength[iy, ix]
+
+        # compute dispersion
+        dispersion_array = np.gradient(slit.wavelength[:, ix])
+        dispersion = dispersion_array[iy]
+
+        # compute expected value
         rel_resp = np.interp(wl, wavelength, relresponse, left=np.nan, right=np.nan)
-        compare = photmjsr * rel_resp
+        compare = photmjsr * rel_resp / np.abs(dispersion)
+
         # Compare the values at the center pixel.
         ratio = output[iy, ix] / input_data[iy, ix]
         result.append(np.allclose(ratio, compare, rtol=1.0e-7))
@@ -1869,6 +1869,35 @@ def test_nircam_spec():
         assert_allclose(ratio, compare, rtol=1.0e-7)
 
 
+def test_unit_handling_no_expected_unit(log_watcher):
+    """Test catch for phot_unit specified but no expected_unit defined."""
+    input_model = create_input(
+        "NIRCAM", "NRCALONG", "NRC_WFSS", filter_used="F356W", pupil="GRISMR"
+    )
+    input_model.meta.exposure.type = "NRC_IMAGE"
+    ds = photom.DataSet(input_model)
+    ftab = create_photom_nircam_wfss(min_wl=2.4, max_wl=5.0, min_r=8.0, max_r=9.0)
+    watcher = log_watcher(
+        "jwst.photom.photom",
+        message="phot_unit attribute found (placeholder), but no expected unit defined",
+        level="warning",
+    )
+    ds.photom_io(ftab.phot_table[0], phot_unit="placeholder")
+    watcher.assert_seen()
+
+
+def test_unit_handling_phot_unit_not_astropy():
+    """Test phot_unit specified but not an astropy unit raises an exception within Astropy."""
+    input_model = create_input(
+        "NIRCAM", "NRCALONG", "NRC_WFSS", filter_used="F356W", pupil="GRISMR"
+    )
+    ds = photom.DataSet(input_model)
+    ftab = create_photom_nircam_wfss(min_wl=2.4, max_wl=5.0, min_r=8.0, max_r=9.0)
+    ftab.phot_unit = "not_a_unit"
+    with pytest.raises(ValueError, match="did not parse as unit"):
+        ds.calc_nircam(ftab)
+
+
 def test_fgs():
     """Test the calc_fgs method of the DataSet class in photom.py."""
     input_model = create_input("FGS", "GUIDER1", "FGS_IMAGE")
@@ -1902,7 +1931,7 @@ def test_apply_photom_1():
     is checking that the pixel area keywords are populated correctly.
     """
     input_model = create_input("NIRCAM", "NRCA3", "NRC_IMAGE", filter_used="F150W", pupil="CLEAR")
-    ds = photom.DataSet(input_model)
+    ds = photom.DataSet(input_model.copy())
     ftab = create_photom_nircam_image()
 
     area_ster = 2.31307642258977e-14
@@ -1994,7 +2023,7 @@ def test_apply_photom_2(srctype):
     relresponse = ftab.phot_table["relresponse"][rownum][0:nelem]
 
     # Recover original input before photom step.
-    ds2 = photom.DataSet(output_model, inverse=True)
+    ds2 = photom.DataSet(output_model.copy(), inverse=True)
     rt_model = ds2.apply_photom(ftab, area_ref)
     for k, slit in enumerate(save_input.slits):
         assert_allclose(rt_model.slits[k].data, slit.data, rtol=1e-4)
@@ -2084,7 +2113,7 @@ def test_invalid_photom_file_bad_timecoeff_length():
 def test_invalid_photom_file_empty_timecoeff_table():
     # Auto-generate an empty extension in the photom model by trying to access it
     ftab = create_photom_miri_image()
-    ftab.timecoeff_linear = ftab.timecoeff_linear
+    ftab.timecoeff_linear = ftab.get_default("timecoeff_linear")
 
     input_model = create_input("MIRI", "MIRIMAGE", "MIR_IMAGE", filter_used="F1800W")
     ds = photom.DataSet(input_model)

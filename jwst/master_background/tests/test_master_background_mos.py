@@ -82,8 +82,15 @@ def nirspec_msa_metfl(tmp_path):
 @pytest.fixture
 def nirspec_msa_extracted2d(nirspec_msa_rate, nirspec_msa_metfl):
     model = ImageModel(nirspec_msa_rate)
+    model.dq = model.get_default("dq")
+    model.err = model.get_default("err")
+    model.var_rnoise = model.get_default("var_rnoise")
+    model.var_poisson = model.get_default("var_poisson")
     model = AssignWcsStep.call(model)
     model = Extract2dStep.call(model)
+    for slit in model.slits:
+        slit.var_rnoise = np.ones_like(slit.data) * 0.01
+        slit.var_poisson = np.ones_like(slit.data) * 0.01
     return model
 
 
@@ -94,6 +101,7 @@ def mk_multispec(model):
     for slit in model.slits:
         if nirspec_utils.is_background_msa_slit(slit):
             slits.append(slit)
+        slit.var_flat = np.ones_like(slit.data) * 0.01
     specs_model.slits.extend(slits)
     specs_model = PixelReplaceStep.call(specs_model)
     specs_model = ResampleSpecStep.call(specs_model)
@@ -179,7 +187,7 @@ def test_apply_master_background(nirspec_msa_extracted2d):
     master_background = nirspec_utils.create_background_from_multispec(specs_model)
     mb_multislit = nirspec_utils.map_to_science_slits(model, master_background)
 
-    result = nirspec_utils.apply_master_background(model, mb_multislit, inverse=False)
+    result = nirspec_utils.apply_master_background(model.copy(), mb_multislit, inverse=False)
 
     # where the background is applied to the science it should be 0 and elsewhere 1
     sci_data_orig = model.slits[-1].data
@@ -189,7 +197,7 @@ def test_apply_master_background(nirspec_msa_extracted2d):
     assert np.allclose(diff[diff != 0], 1)
 
     # Check inverse application
-    result = nirspec_utils.apply_master_background(model, mb_multislit, inverse=True)
+    result = nirspec_utils.apply_master_background(model.copy(), mb_multislit, inverse=True)
 
     # where the background is applied to the science it should be 0 and elsewhere 1
     sci_data_orig = model.slits[-1].data

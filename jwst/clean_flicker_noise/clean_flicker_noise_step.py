@@ -1,3 +1,5 @@
+"""Correct ramp or rate data for flicker noise."""
+
 import logging
 
 from jwst.clean_flicker_noise import autoparam, clean_flicker_noise
@@ -17,7 +19,7 @@ class CleanFlickerNoiseStep(Step):
         autoparam = boolean(default=False) # Automatically select some fit and background parameters for the input data.
         fit_method = option('fft', 'median', default='median')  # Noise fitting algorithm.
         fit_by_channel = boolean(default=False)  # Fit noise separately by amplifier (NIR only).
-        background_method = option('median', 'model', None, default='median') # Background fit.
+        background_method = option('median', 'model', 'median_image', None, default='median') # Background fit.
         background_box_size = int_list(min=2, max=2, default=None)  # Background box size.
         mask_science_regions = boolean(default=False)  # Mask known science regions.
         apply_flat_field = boolean(default=False)  # Apply a flat correction before fitting.
@@ -31,7 +33,7 @@ class CleanFlickerNoiseStep(Step):
         skip = boolean(default=True)  # By default, skip the step.
     """  # noqa: E501
 
-    reference_file_types = ["flat"]
+    reference_file_types = ["flat", "pastasoss"]
 
     def _set_auto_parameters(self, input_model):
         """
@@ -39,12 +41,12 @@ class CleanFlickerNoiseStep(Step):
 
         For any supported exposure type, the data is inspected and fit
         parameters are determined accordingly.  Any parameters specified
-        by the `autoparam` algorithm are directly overridden, ignoring
+        by the ``autoparam`` algorithm are directly overridden, ignoring
         user input.
 
         Parameters
         ----------
-        input_model : DataModel
+        input_model : `~stdatamodels.jwst.datamodels.JwstDataModel`
             Input datamodel to be corrected.
         """
         exp_type = input_model.meta.exposure.type
@@ -75,17 +77,19 @@ class CleanFlickerNoiseStep(Step):
         """
         Fit and subtract 1/f background noise from a ramp data set.
 
-        Input data is expected to be a ramp file (RampModel), in between
-        jump and ramp fitting steps, or a rate file (ImageModel or CubeModel).
+        Input data is expected to be a ramp file
+        (`~stdatamodels.jwst.datamodels.RampModel`), in between
+        jump and ramp fitting steps, or a rate file
+        (`~stdatamodels.jwst.datamodels.ImageModel` or `~stdatamodels.jwst.datamodels.CubeModel`).
 
-        Correction algorithms implemented are:
+        Correction algorithms implemented are (also see :ref`nsclean-algo-references`):
 
-            - "fft": Background noise is fit in frequency space.
-               Implementation is based on the NSClean algorithm, developed
-               by Bernard Rauscher.
-            - "median": Background noise is characterized by a median
-              along the detector slow axis. Implementation is based on the
-              "image1overf" algorithm, developed by Chris Willott.
+        - "fft": Background noise is fit in frequency space.
+          Implementation is based on the NSClean algorithm, developed
+          by Bernard Rauscher.
+        - "median": Background noise is characterized by a median
+          along the detector slow axis. Implementation is based on the
+          "image1overf" algorithm, developed by Chris Willott.
 
         Parameters
         ----------
@@ -127,6 +131,45 @@ class CleanFlickerNoiseStep(Step):
             else:
                 log.info(f"Using FLAT reference file: {flat_filename}")
 
+        exp_type = output_model.meta.exposure.type
+        pastasoss_filename = None
+        if exp_type == "NIS_SOSS":
+            soss_subarrays = [
+                "SUBSTRIP256",
+                "SUB17STRIPE_SOSS",
+                "SUB60STRIPE_SOSS",
+                "SUB204STRIPE_SOSS",
+                "SUB680STRIPE_SOSS",
+                "SUBSTRIP96",
+            ]
+            subarray = output_model.meta.subarray.name
+            if (
+                output_model.meta.subarray.name not in soss_subarrays
+                and self.background_method == "median_image"
+            ):
+                log.warning(
+                    "Skipping: median_image processing is not available "
+                    f"for SOSS subarray {subarray}."
+                )
+                output_model.meta.cal_step.clean_flicker_noise = "SKIPPED"
+                return output_model
+
+            pastasoss = self.get_reference_file(output_model, "pastasoss")
+            if pastasoss == "N/A":
+                log.warning("No PASTASOSS reference file found")
+
+                if self.background_method == "median_image":
+                    log.warning(
+                        "Skipping: median_image processing is not available "
+                        "for SOSS without a pastasoss file."
+                    )
+                    output_model.meta.cal_step.clean_flicker_noise = "SKIPPED"
+                    return output_model
+
+            else:
+                pastasoss_filename = pastasoss
+                log.info(f"Using PASTASOSS reference file: {pastasoss_filename}")
+
         result = clean_flicker_noise.do_correction(
             output_model,
             input_dir=self.input_dir,
@@ -136,6 +179,7 @@ class CleanFlickerNoiseStep(Step):
             background_box_size=self.background_box_size,
             mask_science_regions=self.mask_science_regions,
             flat_filename=flat_filename,
+            pastasoss_filename=pastasoss_filename,
             n_sigma=self.n_sigma,
             fit_histogram=self.fit_histogram,
             single_mask=self.single_mask,

@@ -51,31 +51,12 @@ class StepSpecDocumenter(AttributeDocumenter):
         self.add_line(f"  {txt}", source_name, 2)
 
 
-class PipInstallVersionDirective(SphinxDirective):
-
-    def run(self):
-        help_text = f"pip install jwst=={version}\n"
-        paragraph_node = nodes.literal_block(text=help_text)
-        return [paragraph_node]
-
-
-class CondaInstallVersionDirective(SphinxDirective):
-
-    def run(self):
-        help_text = (
-            "conda create -n <env_name> python=3.13\n"
-            "conda activate <env_name>\n"
-            f"pip install jwst=={version}\n"
-        )
-        paragraph_node = nodes.literal_block(text=help_text)
-        return [paragraph_node]
-
-
 def setup(app):
     # add a custom AttributeDocumenter subclass to handle Step.spec formatting
-    app.add_autodocumenter(StepSpecDocumenter, True)
-    app.add_directive('pip_install_literal', PipInstallVersionDirective)
-    app.add_directive('conda_install_literal', CondaInstallVersionDirective)
+    def register_documenter(app, config):
+        app.add_autodocumenter(StepSpecDocumenter, True)
+    # register it with a high priority so it behaves with the built-in autodoc
+    app.connect("config-inited", register_documenter, priority=9000)
 
 
 conf = ConfigParser()
@@ -93,19 +74,20 @@ with open(Path(__file__).parent.parent / "pyproject.toml", "rb") as metadata_fil
 
 # Configuration for intersphinx: refer to the Python standard library.
 intersphinx_mapping = {
+    'asdf': ('https://asdf.readthedocs.io/en/stable/', None),
+    'astropy': ('https://docs.astropy.org/en/stable/', None),
+    'drizzle': ('https://spacetelescope-drizzle.readthedocs.io/en/latest/', None),
+    'gwcs': ('https://gwcs.readthedocs.io/en/latest/', None),
+    'matplotlib': ('https://matplotlib.org/', None),
+    'numpy': ('https://numpy.org/devdocs', None),
+    'photutils': ('https://photutils.readthedocs.io/en/stable/', None),
     'python': ('https://docs.python.org/3/', None),
     'requests': ('https://requests.readthedocs.io/en/latest/', None),
-    'numpy': ('https://numpy.org/devdocs', None),
     'scipy': ('https://scipy.github.io/devdocs', None),
-    'matplotlib': ('https://matplotlib.org/', None),
-    'astropy': ('https://docs.astropy.org/en/stable/', None),
-    'asdf': ('https://asdf.readthedocs.io/en/stable/', None),
-    'photutils': ('https://photutils.readthedocs.io/en/stable/', None),
-    'gwcs': ('https://gwcs.readthedocs.io/en/stable/', None),
-    'stdatamodels': ('https://stdatamodels.readthedocs.io/en/latest/', None),
     'stcal': ('https://stcal.readthedocs.io/en/latest/', None),
+    'stdatamodels': ('https://stdatamodels.readthedocs.io/en/latest/', None),
     'stpipe': ('https://stpipe.readthedocs.io/en/latest/', None),
-    'drizzle': ('https://spacetelescope-drizzle.readthedocs.io/en/latest/', None),
+    'synphot': ('https://synphot.readthedocs.io/en/latest/', None),
     'tweakwcs': ('https://tweakwcs.readthedocs.io/en/latest/', None),
 }
 
@@ -261,7 +243,7 @@ html_theme_options = {
     # "headbgcolor": "white",
 }
 
-html_logo = '_static/stsci_pri_combo_mark_white.png'
+html_logo = '_static/jwst_logo.png'
 
 # Add any paths that contain custom themes here, relative to this directory.
 #html_theme_path = []
@@ -488,10 +470,13 @@ epub_exclude_files = ['search.html']
 linkcheck_retry = 5
 linkcheck_ignore = [
     "http://stsci.edu/schemas/fits-schema/",  # Old schema from CHANGES.rst
+    "https://stsci.edu",  # CI blocked by service provider
     "https://jwst-docs.stsci.edu",  # CI blocked by service provider
     "https://outerspace.stsci.edu",  # CI blocked by service provider
     "https://jira.stsci.edu/",  # Internal access only
-    r"https://github\.com/spacetelescope/jwst/(?:issues|pull)/\d+",
+    r"https://.*\.readthedocs\.io",  # 429 Client Error: Too Many Requests
+    "https://doi.org",  # CI blocked by service provider (timeout)
+    r"https://github\.com/spacetelescope/jwst/(?:issues|pull|blob)",
 ]
 linkcheck_timeout = 180
 linkcheck_anchors = False

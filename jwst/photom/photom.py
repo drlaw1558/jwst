@@ -109,7 +109,7 @@ class DataSet:
         Parameters
         ----------
         model : `~jwst.datamodels.JwstDataModel`
-            Input Data Model object.
+            Input Data Model object. Updated in place.
         inverse : bool
             Invert the math operations used to apply the corrections.
         source_type : str or None
@@ -179,8 +179,8 @@ class DataSet:
                 if model.meta.target.source_type is not None:
                     self.source_type = model.meta.target.source_type.upper()
 
-        # Create a copy of the input model
-        self.input = model.copy()
+        # Store the input model for updating
+        self.input = model
 
         # Let the user know what we're working with
         log.info("Using instrument: %s", self.instrument)
@@ -414,21 +414,7 @@ class DataSet:
 
         # Handle MultiSlit models separately, which are used for NIRISS WFSS
         if isinstance(self.input, datamodels.MultiSlitModel):
-            # We have to find and apply a separate set of flux cal
-            # data for each of the slits/orders in the input
-            for slit in self.input.slits:
-                # Increment slit number
-                self.slitnum += 1
-
-                # Get the spectral order number for this slit
-                order = slit.meta.wcsinfo.spectral_order
-                log.info(f"Working on slit {slit.name}, order {order}")
-
-                fields_to_match = {"filter": self.filter, "pupil": self.pupil, "order": order}
-                row = find_row(ftab.phot_table, fields_to_match)
-                if row is None:
-                    continue
-                self.photom_io(ftab.phot_table[row], time_correction=correction_table[row])
+            self.calc_wfss(ftab, correction_table, ["filter", "pupil", "order"])
 
         elif isinstance(self.input, datamodels.CubeModel):
             raise DataModelTypeError(
@@ -468,6 +454,7 @@ class DataSet:
         Apply photometric calibration data to dataset and update conversion factor.
 
         For MIRI imaging and LRS modes, matching is based on FILTER and SUBARRAY.
+        For MIRI WFSS the matching is based on FILTER and SUBARRAY.
         MIRI MRS uses dedicated photom reference files per CHANNEL+BAND.
 
         For Imaging and LRS, the routine will find the corresponding row of
@@ -482,8 +469,15 @@ class DataSet:
                or `~jwst.datamodels.MirLrsPhotomModel`
             MIRI photom reference file data model.
         """
+        # Handle MultiSlit models and MIRI WFSS
+        if isinstance(self.input, datamodels.MultiSlitModel) and self.exptype == "MIR_WFSS":
+            # Get a time-dependent correction from the reference file if available
+            mid_time = self.input.meta.exposure.mid_time
+            correction_table = time_dependence.get_correction_table(ftab, mid_time)
+            self.calc_wfss(ftab, correction_table, ["filter", "subarray"])
+
         # Imaging detector
-        if self.detector == "MIRIMAGE":
+        elif self.detector == "MIRIMAGE":
             # Get the subarray value of the input data model
             log.info(" subarray: %s", self.subarray)
             fields_to_match = {"subarray": self.subarray, "filter": self.filter}
@@ -494,7 +488,6 @@ class DataSet:
                 row = find_row(ftab.phot_table, fields_to_match)
                 if row is None:
                     return
-
             # Get a time-dependent correction from the reference file if available
             mid_time = self.input.meta.exposure.mid_time
             correction_table = time_dependence.get_correction_table(ftab, mid_time)
@@ -601,18 +594,7 @@ class DataSet:
 
         # Handle WFSS data separately from regular imaging
         if isinstance(self.input, datamodels.MultiSlitModel) and self.exptype == "NRC_WFSS":
-            # Loop over the WFSS slits, applying the correct photom ref data
-            for slit in self.input.slits:
-                log.info(f"Working on slit {slit.name}")
-                self.slitnum += 1
-                order = slit.meta.wcsinfo.spectral_order
-                # TODO: If it's reasonable to hardcode the list of orders for Nircam WFSS,
-                # the code matching the two rows can be taken outside the loop.
-                fields_to_match = {"filter": self.filter, "pupil": self.pupil, "order": order}
-                row = find_row(ftab.phot_table, fields_to_match)
-                if row is None:
-                    continue
-                self.photom_io(ftab.phot_table[row], time_correction=correction_table[row])
+            self.calc_wfss(ftab, correction_table, ["filter", "pupil", "order"])
         elif self.exptype == "NRC_TSGRISM":
             fields_to_match = {"filter": self.filter, "pupil": self.pupil, "order": self.order}
             row = find_row(ftab.phot_table, fields_to_match)
@@ -729,7 +711,45 @@ class DataSet:
 
         return wave2d, area2d, dqmap
 
-    def photom_io(self, tabdata, order=None, time_correction=None):
+    def calc_wfss(self, ftab, correction_table, match_fields):
+        """
+        Apply photometric calibration to all slits in a WFSS exposure.
+
+        Iterates over each slit in the input ``MultiSlitModel``, looks up the
+        row in the photom reference table matched by the attributes specified
+        in ``match_fields``, and calls ``photom_io`` to apply the conversion.
+
+        Parameters
+        ----------
+        ftab : `~jwst.datamodels.NrcWfssPhotomModel` or `~jwst.datamodels.NisWfssPhotomModel`
+            Photom reference file data model.
+        correction_table : array-like
+            Time-dependence correction values.
+        match_fields : list of str
+            List of field names to use for matching rows in the photom reference table.
+        """
+        fields_to_match = {}
+        for field in match_fields:
+            value = getattr(self, field)
+            fields_to_match[field] = value
+        for slit in self.input.slits:
+            log.info(f"Working on slit {slit.name}")
+            # Increment slit number
+            self.slitnum += 1
+
+            # Get the spectral order number for this slit
+            if "order" in match_fields:
+                order = slit.meta.wcsinfo.spectral_order
+                fields_to_match["order"] = order
+            row = find_row(ftab.phot_table, fields_to_match)
+            if row is None:
+                continue
+            phot_unit = getattr(ftab, "phot_unit", None)
+            self.photom_io(
+                ftab.phot_table[row], time_correction=correction_table[row], phot_unit=phot_unit
+            )
+
+    def photom_io(self, tabdata, order=None, time_correction=None, phot_unit=None):
         """
         Combine photometric conversion factors and apply to the science dataset.
 
@@ -745,6 +765,12 @@ class DataSet:
             recorded on the zero-day MJD (t0).  The scalar conversion factor
             will be divided by the correction value if provided, and if
             ``self.apply_time_correction`` is True.
+        phot_unit : str or None
+            Unit string for the photometric conversion factor from the reference file
+            ``phot_unit`` attribute (e.g. ``"MJy Angstrom s / (DN sr)"``).
+            When provided, it is used to compute a numeric conversion factor to the
+            expected unit for the relevant observing mode. If ``None``, no unit conversion
+            is applied. Currently only implemented for WFSS data.
         """
         # First get the scalar conversion factor.
         # For most modes, the scalar conversion factor in the photom reference
@@ -758,6 +784,7 @@ class DataSet:
         # of the photom step will be in units of surface brightness, as for
         # other types of data.
         unit_is_surface_brightness = True  # default
+
         try:
             conversion = tabdata["photmjsr"]  # unit is MJy / sr
         except KeyError:
@@ -814,6 +841,23 @@ class DataSet:
         else:
             self.input.meta.photometry.conversion_megajanskys = conversion
             self.input.meta.photometry.conversion_microjanskys = conversion * MJSR_TO_UJA2
+
+        if phot_unit is not None:
+            # expected_unit is the unit we decide is "standard" for photmj or photmjsr.
+            # real reference files may use a different unit, passed in as phot_unit, but
+            # phot_unit must be compatible with expected_unit for a given mode.
+            expected_unit = None
+            if self.exptype in ["NRC_WFSS", "NRC_TSGRISM", "NIS_WFSS", "MIR_WFSS"]:
+                expected_unit = "MJy micron s / (DN sr)"
+            if expected_unit is None:
+                log.warning(
+                    f"phot_unit attribute found ({phot_unit}), but no expected unit defined for "
+                    f"exptype {self.exptype}. No unit conversion will be applied."
+                )
+                factor = 1.0
+            else:
+                factor = u.Unit(phot_unit).to(u.Unit(expected_unit))
+            conversion *= factor
 
         # If the photom reference file is for spectroscopic data, the table
         # in the reference file should contain a "wavelength" column (among
@@ -884,7 +928,7 @@ class DataSet:
                     )
                     slit.photom_point = conversion  # store the result
 
-                elif self.exptype in ["NRC_WFSS", "NRC_TSGRISM"]:
+                elif self.exptype in ["NRC_WFSS", "NRC_TSGRISM", "NIS_WFSS", "MIR_WFSS"]:
                     log.info("Including spectral dispersion in 2-d flux calibration")
                     conversion, no_cal = self.create_2d_conversion(
                         slit,
@@ -909,7 +953,7 @@ class DataSet:
                 )
             else:
                 # NRC_TSGRISM data produces a SpecModel, which is handled here
-                if self.exptype in ["NRC_WFSS", "NRC_TSGRISM"]:
+                if self.exptype in ["NRC_WFSS", "NRC_TSGRISM", "NIS_WFSS"]:
                     log.info("Including spectral dispersion in 2-d flux calibration")
                     conversion, no_cal = self.create_2d_conversion(
                         self.input,
@@ -1101,14 +1145,11 @@ class DataSet:
             dispaxis = get_dispersion_direction(self.exptype, self.grating, self.filter, self.pupil)
             if dispaxis is not None:
                 dispersion_array = self.get_dispersion_array(wl_array, dispaxis)
-                # Convert dispersion from micron/pixel to angstrom/pixel
-                dispersion_array *= 1.0e4
                 conv_2d /= np.abs(dispersion_array)
             else:
                 log.warning(
                     "Unable to get dispersion direction, so cannot calculate dispersion array"
                 )
-        # Combine the scalar and 2D conversion factors
         conversion = conversion * conv_2d
         no_cal = np.isnan(conv_2d)
         conversion[no_cal] = 0.0

@@ -4,6 +4,7 @@ Package Index
 .. toctree::
    :maxdepth: 2
 
+   adaptive_trace_model/index.rst
    align_refs/index.rst
    ami_analyze/index.rst
    ami_normalize/index.rst
@@ -64,6 +65,7 @@ Package Index
    stpipe/index.rst
    straylight/index.rst
    superbias/index.rst
+   targ_centroid/index.rst
    tso_photometry/index.rst
    tweakreg/index.rst
    wavecorr/index.rst

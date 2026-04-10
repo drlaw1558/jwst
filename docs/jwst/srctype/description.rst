@@ -39,7 +39,7 @@ exposure. The following choices are used, in order of priority:
 
 #. The source type can be specified by the user on the command line.
    Exposure types for which this is permitted contain a single pre-defined
-   target, i.e. MIR_LRS-FIXEDSLIT, MIR_LRS-SLITLESS, MIR_MRS,NRC_TSGRISM,
+   target, i.e. MIR_LRS-FIXEDSLIT, MIR_LRS-SLITLESS, MIR_MRS, NRC_TSGRISM,
    NRS_FIXEDSLIT, NRS_BRIGHTOBJ, and NRS_IFU. Other EXP_TYPEs will be
    ignored.  For NRS_FIXEDSLIT exposures, a user-supplied value can replace
    the value for the target in the primary slit only, while the other slits
@@ -138,3 +138,7 @@ may show up in a Wide-Field Slitless Spectroscopy exposure. So for these modes
 the ``srctype`` step uses the value from the ``is_extended`` column of the
 source catalog generated from the direct imaging taken with WFSS observations
 and uses that to set "POINT" or "EXTENDED" for each extracted source.
+
+Reference Files
+---------------
+The ``srctype`` step does not use any reference files.

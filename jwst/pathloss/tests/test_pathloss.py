@@ -2,8 +2,10 @@
 Unit tests for pathloss correction
 """
 
+import gwcs
 import numpy as np
-from stdatamodels.jwst.datamodels import MultiSlitModel, PathlossModel
+from astropy.modeling.models import Const1D, Mapping
+from stdatamodels.jwst.datamodels import ImageModel, MultiSlitModel, PathlossModel
 
 from jwst.pathloss.pathloss import (
     calculate_pathloss_vector,
@@ -55,6 +57,89 @@ def test_get_center_exptype():
 
         assert x_pos == 1
         assert y_pos == 2
+
+
+def mock_lrs_wcs(offset_1=-100.0, offset_2=-50.0, det_pos=(105.0, 53.0)):
+    # Mock RA, Dec, wavelength
+    det2sky = Mapping((0, 0, 1), n_inputs=2) | Const1D(149.5) & Const1D(2.0) & Const1D(10.0)
+
+    # Mock detector x, y
+    det2sky.inverse = Mapping((0, 0), n_inputs=3) | Const1D(det_pos[0]) & Const1D(det_pos[1])
+
+    # Store offsets
+    det2sky.offset_1 = offset_1
+    det2sky.offset_2 = offset_2
+
+    input_frame = gwcs.Frame2D(name="detector")
+    output_frame = gwcs.Frame2D(name="world")
+    wcs = gwcs.WCS([(input_frame, det2sky), (output_frame, None)])
+    return wcs
+
+
+def test_get_center_lrs_with_source_pos():
+    """Test MIR_LRS-FIXEDSLIT with source_xpos and source_ypos provided"""
+    # Create a mock LRS model with WCS
+    datmod = ImageModel()
+    datmod.meta.exposure.type = "MIR_LRS-FIXEDSLIT"
+
+    # Create WCS with offsets
+    offset_1 = -100.0
+    offset_2 = -50.0
+    datmod.meta.wcs = mock_lrs_wcs(offset_1=offset_1, offset_2=offset_2)
+    datmod.source_xpos = 99.0
+    datmod.source_ypos = 51.0
+
+    # Test without offsets
+    x_pos, y_pos = get_center("MIR_LRS-FIXEDSLIT", datmod, offsets=False)
+
+    # Should return source position minus the aperture reference point
+    assert x_pos == 99.0 + offset_1
+    assert y_pos == 51.0 + offset_2
+
+
+def test_get_center_lrs_from_ra_dec():
+    """Test MIR_LRS-FIXEDSLIT computing center from RA/Dec"""
+    # Create a mock LRS model with WCS
+    datmod = ImageModel()
+    datmod.meta.exposure.type = "MIR_LRS-FIXEDSLIT"
+    datmod.meta.target.ra = 150.0
+    datmod.meta.target.dec = 2.5
+
+    # Create WCS with offsets and detector position
+    offset_1_val = -100.0
+    offset_2_val = -50.0
+    datmod.meta.wcs = mock_lrs_wcs(
+        offset_1=offset_1_val, offset_2=offset_2_val, det_pos=(105.0, 53.0)
+    )
+
+    # Test without offsets
+    x_pos, y_pos = get_center("MIR_LRS-FIXEDSLIT", datmod, offsets=False)
+
+    # Should return detector position minus the aperture reference point
+    assert x_pos == 105.0 + offset_1_val
+    assert y_pos == 53.0 + offset_2_val
+
+
+def test_get_center_lrs_with_offsets():
+    """Test MIR_LRS-FIXEDSLIT with offsets=True"""
+    datmod = ImageModel()
+    datmod.meta.exposure.type = "MIR_LRS-FIXEDSLIT"
+
+    # Create WCS with offsets
+    offset_1_val = -100.0
+    offset_2_val = -50.0
+    datmod.meta.wcs = mock_lrs_wcs(offset_1=offset_1_val, offset_2=offset_2_val)
+    datmod.source_xpos = 105.0
+    datmod.source_ypos = 53.0
+
+    # Test with offsets=True
+    x_pos, y_pos, imx, imy = get_center("MIR_LRS-FIXEDSLIT", datmod, offsets=True)
+
+    # Should return source position minus aperture ref, plus the aperture ref separately
+    assert x_pos == 105.0 + offset_1_val
+    assert y_pos == 53.0 + offset_2_val
+    assert imx == -offset_1_val
+    assert imy == -offset_2_val
 
 
 # Begin get_aperture_from_model tests

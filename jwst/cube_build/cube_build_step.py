@@ -29,6 +29,7 @@ class CubeBuildStep(Step):
          grating   = option('prism','g140m','g140h','g235m','g235h','g395m','g395h','all',default='all') # Grating
          filter   = option('clear','f100lp','f070lp','f170lp','f290lp','all',default='all') # Filter
          output_type = option('band','channel','grating','multi',default=None) # Type IFUcube to create.
+         linear_wave = boolean(default=True) # Toggle between linear (True) and nonlinear (False) wavelength dimensions
          scalexy = float(default=0.0) # cube sample size to use for axis 1 and axis2, arc seconds
          scalew = float(default=0.0) # cube sample size to use for axis 3, microns
          weighting = option('emsm','msm','drizzle',default = 'drizzle') # Type of weighting function
@@ -57,31 +58,35 @@ class CubeBuildStep(Step):
     # ________________________________________________________________________________
     def process(self, input_data):
         """
-        Build an IFUCube from overlapping IFUImage data.
+        Build an IFU cube from overlapping IFU image data.
 
-        This is the controlling routine for building IFU Spectral Cubes.
+        This is the controlling routine for building IFU spectral cubes.
         It loads and sets the various input data and parameters needed by
-        the cube_build_step.
+        the ``cube_build`` step.
 
         This routine does the following operations:
 
-           1. Extracts the input parameters from the cubepars reference file and
-              merges them with any user-provided values.
-           2. Creates the output WCS from the input images and defines the mapping
-              between all the input arrays and the output array.
-           3. Passes the input data to the function to map all their input data
-              to the output array.
-           4. Updates the output data model with correct meta data.
+        1. Extracts the input parameters from the cubepars reference file and
+           merges them with any user-provided values.
+        2. Creates the output WCS from the input images and defines the mapping
+           between all the input arrays and the output array.
+        3. Passes the input data to the function to map all their input data
+           to the output array.
+        4. Updates the output data model with correct meta data.
 
         Parameters
         ----------
-        input_data : list of DataModel or str
-           List of datamodels or string of input fits filenames or association name.
+        input_data : str, list, `~stdatamodels.jwst.datamodels.IFUImageModel`, or \
+                     `~jwst.datamodels.container.ModelContainer`
+           Association or datamodel file name, a single datamodel, or a
+           list or container of datamodels or file names. The input is expected to be
+           one or more 2D spectral images, to combine together into one or more
+           spectral cubes.
 
         Returns
         -------
-        cube_container : ModelContainer
-           Container (list) of IFUCube models
+        cube_container : `~jwst.datamodels.container.ModelContainer`
+           Container (list) of `~stdatamodels.jwst.datamodels.IFUCubeModel`.
         """
         log.info("Starting IFU Cube Building Step")
 
@@ -147,7 +152,7 @@ class CubeBuildStep(Step):
             self.weighting = "emsm"
             if self.output_type is None:  # when running stand alone
                 self.output_type = "band"
-
+                self.linear_wave = True
         # if interpolation is point cloud then weighting can be
         # 1. MSM: modified Shepard method
         # 2. EMSM
@@ -207,13 +212,15 @@ class CubeBuildStep(Step):
         # if options channel, band, grating, or  filter are set on the command lines
         # then set self.pars_input['output_type'] = 'user' and fill in  par_input with values
         self.read_user_input()
+
+        # Read in the input data and make a copy as needed.
+        read_in_models = self.prepare_output(input_data)
+
         # ________________________________________________________________________________
         # DataTypes
-        # Read in the input data - 4 formats are allowed:
-        # 1. filename
-        # 2. single model
-        # 3. ASN table
-        # 4. model container
+        # Read in the input data - 2 formats are expected:
+        # 1. single model
+        # 2. model container
         # figure out what type of data we have. Fill in the input_table.input_models.
         # input_table.input_models is used in the rest of IFU Cube Building
         # We need to do this in cube_build_step because we need to pass the data_model
@@ -223,38 +230,43 @@ class CubeBuildStep(Step):
         #  channel, sub-channel  grating or filter to filename
         # ________________________________________________________________________________
         input_table = data_types.DataTypes(
-            input_data, self.single, self.output_file, self.output_dir
+            read_in_models, self.single, self.output_file, self.output_dir
         )
-
-        self.input_models = input_table.input_models
+        input_models = input_table.input_models
         self.output_name_base = input_table.output_name
-        # ________________________________________________________________________________
 
         # Read in the first input model to determine with instrument we have
         # output type is by default 'Channel' for MIRI and 'Band' for NIRSpec
-        instrument = self.input_models[0].meta.instrument.name.upper()
+        instrument = input_models[0].meta.instrument.name.upper()
 
         # The calspec2 pipeline sets up output_type for each instrument. When running cube_build
         # stand alone we to set output_type.
 
-        # Running cube build stand-alone without setting self.pipeline will default to pipeline=2
-        if self.pipeline == 2 and self.output_type is None:
-            if instrument == "MIRI":
-                self.output_type = "multi"
-            elif instrument == "NIRSPEC":
+        # Running cube build stand-alone without setting self.pipeline will default to pipeline=3
+
+        # for NIRSPEC the type of cubes to make are based on self.linear_wave
+        if instrument == "NIRSPEC":
+            if self.output_type == "multi":  # keep this for now
+                self.linear_wave = False
+
+            if self.linear_wave:
                 self.output_type = "band"
+            else:
+                self.output_type = "multi"
+
+        # set up default pipeline 2
+        if self.pipeline == 2 and self.output_type is None and instrument == "MIRI":
+            self.output_type = "multi"
+
         # Set up output_type for pipeline 3 type cubes.
         # In calspec3 the output_type default type is grating for NIRSpec and band for MIRI.
         # MIRI sets output_type in the calspec3 parameter reference file.
 
-        if self.pipeline == 3 and self.output_type is None:
-            if instrument == "NIRSPEC":
-                self.output_type = "band"  # we might switch that to grating
-
-            elif instrument == "MIRI":
-                self.output_type = "band"
+        if self.pipeline == 3 and self.output_type is None and instrument == "MIRI":
+            self.output_type = "band"
 
         self.pars_input["output_type"] = self.output_type
+        self.pars_input["linear_wave"] = self.linear_wave
         log.info(f"Setting output type to: {self.output_type}")
         # ________________________________________________________________________________
         # If an offset file is provided do some basic checks on the file and its contents.
@@ -264,22 +276,20 @@ class CubeBuildStep(Step):
         self.offsets = None
 
         if self.offset_file is not None:
-            offsets = self.check_offset_file()
+            offsets = self.check_offset_file(input_models)
             if offsets is not None:
                 self.offsets = offsets
         # ________________________________________________________________________________
         # Read in Cube Parameter Reference file
         # identify what reference file has been associated with these input
 
-        par_filename = self.get_reference_file(self.input_models[0], "cubepar")
+        par_filename = self.get_reference_file(input_models[0], "cubepar")
         # Check for a valid reference file
         if par_filename == "N/A":
-            log.warning("No default cube parameters reference file found")
-            input_table.close()
-            return
-        # ________________________________________________________________________________
-        # shove the input parameters in to pars to pull out in general cube_build.py
+            log.error("No default cube parameters reference file found")
+            raise ValueError("The cubepar reference file is required.")
 
+        # shove the input parameters in to pars to pull out in general cube_build.py
         pars = {
             "channel": self.pars_input["channel"],
             "subchannel": self.pars_input["subchannel"],
@@ -319,14 +329,14 @@ class CubeBuildStep(Step):
         # create an instance of class CubeData
 
         # Make sure all input models have consistent NaN and DO_NOT_USE values
-        for model in self.input_models:
+        for model in input_models:
             match_nans_and_flags(model)
 
         # We need to know what type of cubes we are building for cube_build.py to correctly
         # group the data. This information is controlled by the self.output_type parameter, which
         # is also dependent on the self.pipeline parameter.
 
-        cubeinfo = cube_build.CubeData(self.input_models, par_filename, **pars)
+        cubeinfo = cube_build.CubeData(input_models, par_filename, **pars)
         # ________________________________________________________________________________
         # cubeinfo.setup:
         # read in all the input files, information from cube_pars, read in input data
@@ -340,10 +350,10 @@ class CubeBuildStep(Step):
         master_table = result["master_table"]
 
         if instrument == "MIRI" and self.coord_system == "internal_cal":
-            log.warning("The output coordinate system of internal_cal is not valid for MIRI")
-            log.warning("use output_coord = ifualign instead")
-            input_table.close()
-            return
+            log.error("The output coordinate system of internal_cal is not valid for MIRI")
+            log.error("use coord_system = ifualign instead")
+            raise ValueError("The 'internal_cal' coordinate system is not supported for MIRI")
+
         # filenames = master_table.FileMap["filename"] # This was used to determine if we have
         # pipeline 2 or 3. I don't think we need it - but saving it just in case I need know if
         # there is only 1 filename
@@ -371,9 +381,10 @@ class CubeBuildStep(Step):
             list_par2 = cube_pars[icube]["par2"]
             thiscube = ifu_cube.IFUCubeData(
                 self.pipeline,
-                self.input_models,
+                input_models,
                 self.output_name_base,
                 self.pars_input["output_type"],
+                self.pars_input["linear_wave"],
                 instrument,
                 list_par1,
                 list_par2,
@@ -444,7 +455,10 @@ class CubeBuildStep(Step):
         t1 = time.time()
         log.debug(f"Time to build all cubes {t1 - t0}")
 
-        input_table.close()
+        # Output is a new model, so close the input if it was opened here
+        if read_in_models is not input_data:
+            read_in_models.close()
+
         return cube_container
 
     # ******************************************************************************
@@ -455,10 +469,10 @@ class CubeBuildStep(Step):
 
         Determine if any of the input parameters channel, band, filter or
         grating have been set by the user.
-        This routine updates the dictionary self.pars_input with any user
-        provided inputs. In particular it sets pars_input['channel'],
-        pars_input['sub_channel'], pars_input['grating'], and
-        pars_input['filter'] with user provided values.
+        This routine updates the dictionary ``self.pars_input`` with any user
+        provided inputs. In particular it sets ``pars_input['channel']``,
+        ``pars_input['sub_channel']``, ``pars_input['grating']``, and
+        ``pars_input['filter']`` with user provided values.
         """
         valid_channel = ["1", "2", "3", "4", "all"]
         valid_subchannel = [
@@ -575,11 +589,11 @@ class CubeBuildStep(Step):
 
     # ________________________________________________________________________________
 
-    def check_offset_file(self):
+    def check_offset_file(self, input_models):
         """
-        Read in an optional ra and dec offset for each file.
+        Read in an optional RA and Dec offset for each file.
 
-        Check that the offset file is an asdf file.
+        Check that the offset file is an ASDF file.
         Check that the file has the correct format using an local schema file.
         For each file in the input association check that there is a corresponding
         file in the offset file.
@@ -615,7 +629,7 @@ class CubeBuildStep(Step):
         # It must be arcsec or a validation error occurs.
 
         # check that all the file names in input_model are in the offset filename
-        for model in self.input_models:
+        for model in input_models:
             file_check = model.meta.filename
             if file_check in offset_filename:
                 continue

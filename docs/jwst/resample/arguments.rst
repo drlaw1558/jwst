@@ -87,6 +87,14 @@ image.
         ``pixel_scale_ratio``, ``pixel_scale``, ``rotation``, ``crpix``,
         and ``crval`` will be ignored.
 
+    When ``output_wcs`` is a FITS WCS-like GWCS, it is recommended that it be
+    constructed using `~gwcs.fitswcs.FITSImagingWCSTransform` object. This
+    allows for proper writing of the WCS parameters to the output
+    model's ``wcsinfo`` which is used to assign FITS WCS keywords to the resampled
+    image's header. Otherwise FITS WCS keywords will be determined by fitting
+    a linear FITS WCS to the output GWCS, which may not result in correct WCS
+    parameters if ``output_wcs`` contains distortions.
+
 ``--fillval`` (str, default='NAN')
     The value to assign to output pixels that have zero weight or do not
     receive any flux from any input pixels during drizzling.
@@ -133,3 +141,21 @@ image.
   Setting this to `False` helps reduce output file size for very large mosaics,
   but note that the variances are still computed internally if ``enable_err`` is `True`
   because they are needed to compute the error array.
+
+``--propagate_dq`` (boolean, default=False)
+    Indicates whether to propagate DQ flags from input models to the output
+    model. DQ flags are propagated by ``bitwise-OR`` of all input DQ flags that
+    contribute to a given output pixel.
+
+``--pixmap_stepsize``
+  Indicates the spacing in pixels at which the WCS is evaluated when computing the pixel map.
+  Larger step sizes result in faster performance at the cost of accuracy.
+  Interpolation is only performed if ``pixmap_stepsize > 1``.
+  If it's desired to turn on interpolation, we recommend a value of ~10
+  which seemed to work well for most modes during testing.
+  Default is 1.
+
+``--pixmap_order``
+  Interpolating spline order for pixel map computation. Has no effect unless
+  ``pixmap_stepsize > 1``. Must be 1 or 3. If it's desired to turn on interpolation,
+  we recommend a value of 3, i.e., cubic spline. Default is 1.

@@ -4,7 +4,11 @@ from copy import deepcopy
 import asdf
 import numpy as np
 import pytest
+from astropy import coordinates as coord
 from astropy.io import fits
+from astropy.modeling import models
+from gwcs import coordinate_frames as cf
+from gwcs import wcs
 from gwcs.wcstools import grid_from_bounding_box
 from numpy.testing import assert_allclose
 from stcal.alignment.util import compute_scale
@@ -36,14 +40,52 @@ def _set_photom_kwd(im):
         bb = ((xmin - 0.5, xmax - 0.5), (ymin - 0.5, ymax - 0.5))
         im.meta.wcs.bounding_box = bb
 
-    mean_pixel_area = compute_mean_pixel_area(
-        im.meta.wcs,
-        shape=im.data.shape,
+    if "SPECTRAL" not in im.meta.wcs.output_frame.axes_type:
+        mean_pixel_area = compute_mean_pixel_area(
+            im.meta.wcs,
+            shape=im.data.shape,
+        )
+
+        if mean_pixel_area == 0.0:
+            raise RuntimeError("Degenerate WCS boundary detected. Cannot compute pixel area.")
+
+        if mean_pixel_area:
+            im.meta.photometry.pixelarea_steradians = mean_pixel_area
+            im.meta.photometry.pixelarea_arcsecsq = mean_pixel_area * np.rad2deg(3600) ** 2
+
+
+def _build_imaging_refwcs_basic_models(model):
+    crpix1 = model.meta.wcsinfo.crpix1
+    crpix2 = model.meta.wcsinfo.crpix2
+    cdelt1 = model.meta.wcsinfo.cdelt1
+    cdelt2 = model.meta.wcsinfo.cdelt2
+    crval1 = model.meta.wcsinfo.crval1
+    crval2 = model.meta.wcsinfo.crval2
+    pc11 = model.meta.wcsinfo.pc1_1
+    pc12 = model.meta.wcsinfo.pc1_2
+    pc21 = model.meta.wcsinfo.pc2_1
+    pc22 = model.meta.wcsinfo.pc2_2
+
+    shift = models.Shift(-crpix1 + 1) & models.Shift(-crpix2 + 1)
+    cd = np.dot(np.diag([cdelt1, cdelt2]), np.array([[pc11, pc12], [pc21, pc22]]))
+    rotation = models.AffineTransformation2D(cd, translation=[0, 0])
+
+    assert model.meta.wcsinfo.ctype1.endswith("-TAN"), "Only TAN projections are supported for now"
+    tan = models.Pix2Sky_TAN()
+    celestial_rotation = models.RotateNative2Celestial(crval1, crval2, 180)
+    det2sky = shift | rotation | tan | celestial_rotation
+
+    detector_frame = cf.Frame2D(name="detector", axes_names=("x", "y"))
+    sky_frame = cf.CelestialFrame(reference_frame=coord.ICRS(), name="world")
+    pipeline = [(detector_frame, det2sky), (sky_frame, None)]
+    refwcs = wcs.WCS(pipeline)
+
+    refwcs.bounding_box = (
+        (-0.5, model.data.shape[1] - 0.5),
+        (-0.5, model.data.shape[0] - 0.5),
     )
 
-    if mean_pixel_area:
-        im.meta.photometry.pixelarea_steradians = mean_pixel_area
-        im.meta.photometry.pixelarea_arcsecsq = mean_pixel_area * np.rad2deg(3600) ** 2
+    return refwcs
 
 
 def miri_rate_model():
@@ -57,7 +99,9 @@ def miri_rate_model():
     shape = (ysize, xsize)
     im = ImageModel(shape)
     im.data += 5
-    im.var_rnoise += 1
+    im.dq = im.get_default("dq")
+    im.err = im.get_default("err")
+    im.var_rnoise = np.ones(shape)
     im.meta.wcsinfo = {
         "dec_ref": 40,
         "ra_ref": 100,
@@ -99,6 +143,11 @@ def miri_rate_model():
         "type": "MIR_LRS-SLITLESS",
         "zero_frame": False,
     }
+    im.meta.photometry = {
+        "pixelarea_steradians": 2.844e-13,
+        "pixelarea_arcsecsq": 0.011,
+    }
+
     return im
 
 
@@ -112,7 +161,6 @@ def miri_rate():
 @pytest.fixture
 def miri_cal(miri_rate):
     im = AssignWcsStep.call(miri_rate)
-    _set_photom_kwd(im)
 
     # Add non-zero values to check flux conservation
     im.data += 1.0
@@ -131,6 +179,7 @@ def miri_rate_zero_crossing():
     )
     shape = (ysize, xsize)
     im = ImageModel(shape)
+    im.dq = im.get_default("dq")
     im.var_rnoise = np.random.random(shape)
     im.meta.wcsinfo = {
         "dec_ref": 2.16444343946559e-05,
@@ -172,6 +221,10 @@ def miri_rate_zero_crossing():
         "type": "MIR_LRS-FIXEDSLIT",
         "zero_frame": False,
     }
+    im.meta.photometry = {
+        "pixelarea_steradians": 2.844e-13,
+        "pixelarea_arcsecsq": 0.011,
+    }
 
     yield im
     im.close()
@@ -198,7 +251,10 @@ def nircam_rate():
     ysize = 204
     shape = (ysize, xsize)
     im = ImageModel(shape)
-    im.var_rnoise += 0
+    im.err = im.get_default("err")
+    im.var_rnoise = np.ones(shape)
+    rng = np.random.default_rng(seed=1)
+    im.dq = 2 ** rng.integers(10, 22, size=shape).astype(np.uint32)
     im.meta.wcsinfo = {
         "ctype1": "RA---TAN",
         "ctype2": "DEC--TAN",
@@ -264,8 +320,8 @@ def nircam_rate():
         "type": "NRC_IMAGE",
     }
     im.meta.photometry = {
-        "pixelarea_steradians": 1e-13,
-        "pixelarea_arcsecsq": 4e-3,
+        "pixelarea_steradians": 9.4e-14,
+        "pixelarea_arcsecsq": 4.0e-3,
     }
     yield im
     im.close()
@@ -277,7 +333,10 @@ def nirspec_rate():
     xsize = 2048
     shape = (ysize, xsize)
     im = ImageModel(shape)
-    im.var_rnoise += 1
+    im.dq = im.get_default("dq")
+    im.err = im.get_default("err")
+    im.var_rnoise = np.ones(shape)
+    im.var_poisson = np.ones(shape)
     im.meta.target = {"ra": 100.1237, "dec": 39.86}
     im.meta.wcsinfo = {
         "dec_ref": 40,
@@ -327,6 +386,10 @@ def nirspec_rate():
         "start_time": 58119.8333,
         "type": "NRS_FIXEDSLIT",
         "zero_frame": False,
+    }
+    im.meta.photometry = {
+        "pixelarea_steradians": 2.844e-13,
+        "pixelarea_arcsecsq": 0.011,
     }
 
     yield im
@@ -430,29 +493,143 @@ def test_miri_wcs_roundtrip(miri_cal):
     im.close()
 
 
-def test_single_image_file_input(nircam_rate, tmp_cwd):
+@pytest.mark.parametrize("propagate_dq", [True, False])
+def test_single_image_file_input(nircam_rate, tmp_cwd, propagate_dq):
     """Ensure step can be run on a single image file."""
     # Create a temporary file with the input data
     im = AssignWcsStep.call(nircam_rate, sip_approx=False)
     im.meta.filename = "test_input.fits"
+    im.var_rnoise += 1.0
+
+    # Add a bad pixel in the error plane, not matched with a NaN in data.
+    # This will test if the match_nans_and_flags call at the beginning
+    # of the step modifies the input model.
+    im.err[0, 0] = np.nan
+
+    # Save a copy to disk, keep a copy of the data for testing.
     im.save("test_input.fits")
+    im_copy = im.data.copy()
 
     # Run the step on the file
-    result_from_memory = ResampleStep.call(im)
-    result_from_file = ResampleStep.call("test_input.fits")
+    good_bits = sum([2**i for i in range(10, 22)])
+
+    result_from_memory = ResampleStep.call(
+        im,
+        propagate_dq=propagate_dq,
+    )
+    result_from_file = ResampleStep.call(
+        "test_input.fits",
+        propagate_dq=propagate_dq,
+    )
 
     # Check that the output is as expected
     assert result_from_memory.meta.cal_step.resample == "COMPLETE"
     assert result_from_file.meta.cal_step.resample == "COMPLETE"
     assert_allclose(result_from_file.data, result_from_memory.data, equal_nan=True)
+    if propagate_dq:
+        assert np.all(result_from_file.dq == result_from_memory.dq)
+        assert np.bitwise_or.reduce(result_from_memory.dq, axis=(0, 1)) == good_bits
 
     # Check that input model was not modified
     assert im is not result_from_memory
     assert im.meta.cal_step.resample is None
+    assert_allclose(im.data, im_copy)
 
     result_from_file.close()
     result_from_memory.close()
     im.close()
+
+
+@pytest.mark.parametrize("propagate_dq", [True, False])
+def test_single_spec_file_input(miri_cal, tmp_cwd, propagate_dq):
+    """Ensure step can be run on a single image file."""
+    # Create a temporary file with the input data
+
+    im = AssignWcsStep.call(miri_cal)
+    im.meta.filename = "test_input.fits"
+    im.var_rnoise += 1.0
+    rng = np.random.default_rng(seed=1)
+    im.dq = 2 ** rng.integers(10, 22, size=im.data.shape).astype(np.uint32)
+
+    # Add a bad pixel in the error plane, not matched with a NaN in data.
+    # This will test if the match_nans_and_flags call at the beginning
+    # of the step modifies the input model.
+    im.err[0, 0] = np.nan
+
+    # Save a copy to disk, keep a copy of the data for testing.
+    im.save("test_input.fits")
+    im_copy = im.data.copy()
+
+    # Run the step on the file
+    good_bits = sum([2**i for i in range(10, 22)])
+
+    result_from_memory = ResampleSpecStep.call(
+        im,
+        propagate_dq=propagate_dq,
+    )
+    result_from_file = ResampleSpecStep.call(
+        "test_input.fits",
+        propagate_dq=propagate_dq,
+    )
+
+    # Check that the output is as expected
+    assert result_from_memory.meta.cal_step.resample == "COMPLETE"
+    assert result_from_file.meta.cal_step.resample == "COMPLETE"
+    assert_allclose(result_from_file.data, result_from_memory.data, equal_nan=True)
+    if propagate_dq:
+        assert np.all(result_from_file.dq == result_from_memory.dq)
+        assert np.bitwise_or.reduce(result_from_memory.dq, axis=(0, 1)) == good_bits
+    else:
+        assert result_from_file.dq is None
+        assert result_from_memory.dq is None
+
+    # Check that input model was not modified
+    assert im is not result_from_memory
+    assert im.meta.cal_step.resample is None
+    assert_allclose(im.data, im_copy)
+
+    result_from_file.close()
+    result_from_memory.close()
+    im.close()
+
+
+def test_list_model_input(nircam_rate, tmp_cwd):
+    """Ensure step can be run on a list of models without modifying them."""
+    # Create a temporary file with the input data
+    im = AssignWcsStep.call(nircam_rate, sip_approx=False)
+    im.meta.filename = "test_input_1.fits"
+
+    # Add a bad pixel in the error plane, not matched with a NaN in data.
+    # This will test if the match_nans_and_flags call at the beginning
+    # of the step modifies the input model.
+    im.err[0, 0] = np.nan
+
+    # Keep a copy of the data for testing
+    im_copy = im.data.copy()
+
+    # Make a list of input models to run
+    im2 = im.copy()
+    im2.meta.filename = "test_input_2.fits"
+    im_list = [im, im2]
+
+    # Run the step on the file
+    result = ResampleStep.call(im_list)
+
+    # Check that the output is as expected
+    assert isinstance(result, ImageModel)
+    assert result.meta.cal_step.resample == "COMPLETE"
+
+    # Check that input models were not modified
+    assert result is not im
+    assert result is not im2
+    assert im.meta.cal_step.resample is None
+    assert im2.meta.cal_step.resample is None
+    assert_allclose(im.data, im_copy)
+    assert_allclose(im2.data, im_copy)
+
+    result.close()
+    im.close()
+    im2.close()
 
 
 @pytest.mark.parametrize("ratio", [0.5, 0.7, 1.0])
@@ -878,9 +1055,9 @@ def test_resample_variance(nircam_rate, n_images, weight_type):
     var_poisson = 0.00025
     im = AssignWcsStep.call(nircam_rate)
     _set_photom_kwd(im)
-    im.var_rnoise += var_rnoise
-    im.var_poisson += var_poisson
-    im.err += err
+    im.var_rnoise = im.get_default("var_rnoise") + var_rnoise
+    im.var_poisson = im.get_default("var_poisson") + var_poisson
+    im.err = im.get_default("err") + err
     im.meta.filename = "foo.fits"
 
     c = ModelLibrary([im.copy() for _ in range(n_images)])
@@ -909,9 +1086,9 @@ def test_resample_variance_context_disable(
     var_poisson = 0.00025
     im = AssignWcsStep.call(nircam_rate)
     _set_photom_kwd(im)
-    im.var_rnoise += var_rnoise
-    im.var_poisson += var_poisson
-    im.err += err
+    im.var_rnoise = im.get_default("var_rnoise") + var_rnoise
+    im.var_poisson = im.get_default("var_poisson") + var_poisson
+    im.err = im.get_default("err") + err
     im.meta.filename = "foo.fits"
     # Adding bunit_err covers a bug where the ERR extension was being created just to hold that
     im.meta.bunit_err = "MJy/sr"
@@ -968,9 +1145,9 @@ def test_resample_variance_context_disable(
 def test_resample_undefined_variance(caplog, nircam_rate, shape):
     """Test that resampled variance and error arrays are computed properly"""
     im = AssignWcsStep.call(nircam_rate)
-    im.var_rnoise = np.ones(shape, dtype=im.var_rnoise.dtype.type)
-    im.var_poisson = np.ones(shape, dtype=im.var_poisson.dtype.type)
-    im.var_flat = np.ones(shape, dtype=im.var_flat.dtype.type)
+    im.var_rnoise = np.ones(shape, dtype=im.get_dtype("var_rnoise"))
+    im.var_poisson = np.ones(shape, dtype=im.get_dtype("var_poisson"))
+    im.var_flat = np.ones(shape, dtype=im.get_dtype("var_flat"))
     im.meta.filename = "foo.fits"
     c = ModelLibrary([im])
 
@@ -1024,10 +1201,13 @@ def test_custom_wcs_resample_imaging(nircam_rate, ratio, rotation, crpix, crval,
     result.close()
 
 
+@pytest.mark.parametrize("use_fits_transforms", [False, True])
 @pytest.mark.parametrize(
     "output_shape2, match", [((1205, 1100), True), ((1222, 1111), False), (None, True)]
 )
-def test_custom_refwcs_resample_imaging(nircam_rate, output_shape2, match, tmp_path):
+def test_custom_refwcs_resample_imaging(
+    nircam_rate, output_shape2, match, use_fits_transforms, tmp_path
+):
     # make some data with a WCS and some random values
     im = AssignWcsStep.call(nircam_rate, sip_approx=False)
     rng = np.random.default_rng(seed=77)
@@ -1061,7 +1241,11 @@ def test_custom_refwcs_resample_imaging(nircam_rate, output_shape2, match, tmp_p
         assert_allclose(result.meta.wcs(*crpix), crval, rtol=1e-12, atol=0)
 
     refwcs = str(tmp_path / "resample_refwcs.asdf")
-    asdf.AsdfFile({"wcs": result.meta.wcs, "array_shape": data1.shape}).write_to(refwcs)
+    if use_fits_transforms:
+        w = _build_imaging_refwcs_basic_models(result)
+    else:
+        w = result.meta.wcs
+    asdf.AsdfFile({"wcs": w, "array_shape": data1.shape}).write_to(refwcs)
 
     result = ResampleStep.call(im, output_shape=output_shape2, output_wcs=refwcs)
 
@@ -1616,8 +1800,21 @@ def test_nirspec_lamp_pixscale(nirspec_lamp, tmp_path):
     result4.close()
 
 
-def test_spec_output_is_not_input(nirspec_cal):
-    im = ResampleSpecStep.call(nirspec_cal)
+@pytest.mark.parametrize("input_list", [True, False])
+def test_spec_input_not_modified(nirspec_cal, input_list):
+    # Add a bad pixel in the error plane of one slit, not matched
+    # with a NaN in data.
+    # This will test if the match_nans_and_flags call at the beginning
+    # of the step modifies the input model.
+    nirspec_cal.slits[0].err[15, 100] = np.nan
+    data_copy = nirspec_cal.slits[0].data.copy()
+
+    if input_list:
+        input_models = [nirspec_cal, nirspec_cal.copy()]
+    else:
+        input_models = nirspec_cal
+
+    im = ResampleSpecStep.call(input_models)
 
     # Step is complete
     assert im.meta.cal_step.resample == "COMPLETE"
@@ -1625,6 +1822,11 @@ def test_spec_output_is_not_input(nirspec_cal):
     # Input is not modified
     assert im is not nirspec_cal
     assert nirspec_cal.meta.cal_step.resample is None
+    if input_list:
+        for model in input_models:
+            assert_allclose(model.slits[0].data, data_copy)
+    else:
+        assert_allclose(input_models.slits[0].data, data_copy)
 
 
 def test_spec_skip_cube():
@@ -1638,3 +1840,23 @@ def test_spec_skip_cube():
     # Input is not modified
     assert result is not model
     assert model.meta.cal_step.resample is None
+
+
+def test_resample_imaging_pixmap_interpolation(nircam_rate):
+    """Test that resample gives similar results with non-default pixmap interpolation settings."""
+    img = AssignWcsStep.call(nircam_rate, sip_approx=False)
+    # give the data some structure
+    img.data = np.random.default_rng(seed=77).random(img.data.shape)
+    img.var_rnoise = np.ones_like(img.data) * 1e-3
+
+    # resampling rotates the image a little bit, i.e. this is indeed nontrivial
+    ref = ResampleStep.call(img, pixmap_order=1, pixmap_stepsize=1)
+    res = ResampleStep.call(img, pixmap_order=3, pixmap_stepsize=10)
+
+    # catch issue where bad inputs can cause all-NaN output when variance is zero everywhere
+    assert not np.all(np.isnan(res.data))
+    # ensure results are very similar
+    assert_allclose(res.data, ref.data, rtol=1.0e-6, atol=1.0e-9)
+    # ensure results are not identical (i.e. pixmap settings actually did something)
+    with pytest.raises(AssertionError):
+        assert_allclose(res.data, ref.data)

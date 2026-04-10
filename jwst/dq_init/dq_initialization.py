@@ -15,28 +15,31 @@ guider_list = ["FGS_ID-IMAGE", "FGS_ID-STACK", "FGS_ACQ1", "FGS_ACQ2", "FGS_TRAC
 __all__ = ["do_dqinit", "check_dimensions"]
 
 
-def do_dqinit(output_model, mask_model):
+def do_dqinit(output_model, mask_model, user_dq=None):
     """
     Perform the dq_init step on a JWST datamodel.
 
     Parameters
     ----------
-    output_model : `~stdatamodels.jwst.datamodels.RampModel` \
-                   or `~stdatamodels.jwst.datamodels.GuiderRawModel`
+    output_model : `~stdatamodels.jwst.datamodels.RampModel` or \
+                   `~stdatamodels.jwst.datamodels.GuiderRawModel`
         The JWST datamodel to be corrected.
     mask_model : `~stdatamodels.jwst.datamodels.MaskModel`
         The mask model to use in the correction.
+    user_dq : ndarray or None
+        User-supplied DQ int array, if any.
 
     Returns
     -------
-    output_model : `~stdatamodels.jwst.datamodels.RampModel` \
-                   or `~stdatamodels.jwst.datamodels.GuiderRawModel`
+    output_model : `~stdatamodels.jwst.datamodels.RampModel` or \
+                   `~stdatamodels.jwst.datamodels.GuiderRawModel`
         The corrected JWST datamodel, updated in place.
     """
     # Inflate empty DQ array, if necessary
     check_dimensions(output_model)
 
     # Extract subarray from reference data, if necessary
+    # TODO: is it possible for stripe mask to match the input model? If so, this will fail.
     if reffile_utils.ref_matches_sci(output_model, mask_model):
         mask_array = mask_model.dq
     else:
@@ -45,9 +48,29 @@ def do_dqinit(output_model, mask_model):
         mask_array = mask_sub_model.dq
         del mask_sub_model
 
+    if user_dq is not None:
+        if user_dq.shape != mask_array.shape:
+            errmsg = f"user_dq has shape={user_dq.shape} but expecting {mask_array.shape}"
+            log.error(errmsg)
+            raise ValueError(errmsg)
+
+        user_dq = user_dq.astype(mask_array.dtype)
+        mask_array |= user_dq
+
     # Set model-specific data quality in output
+    num_superstripe = getattr(output_model.meta.subarray, "num_superstripe", None)
     if output_model.meta.exposure.type in guider_list:
         output_model.dq |= mask_array
+
+    elif num_superstripe is not None and num_superstripe > 0:
+        # Store 3-D DQ array in pixeldq
+        output_model.pixeldq = mask_array
+        # Generate 4-D groupdq mask_array from pixeldq array, given output groupdq shape
+        nints, ngroups, _, _ = output_model.groupdq.shape
+        nsci_ints = nints // num_superstripe
+        mask_array = mask_array[:, np.newaxis, :, :].repeat(ngroups, axis=1)
+        mask_array = np.tile(mask_array, reps=(nsci_ints, 1, 1, 1))
+        output_model.groupdq |= mask_array & dqflags.group["DO_NOT_USE"]
     else:
         output_model.pixeldq |= mask_array
 
@@ -62,18 +85,19 @@ def do_dqinit(output_model, mask_model):
 
 def check_dimensions(input_model):
     """
-    Check the input model pixeldq dimensions.
+    Check the input model ``pixeldq`` dimensions.
 
-    The pixeldq attribute should have the same dimensions as
+    The ``pixeldq`` attribute should have the same dimensions as
     the image plane of the input model science data
-    If it has dimensions (0,0), create an array of zeros with the same shape
+    If it has dimensions ``(0, 0)``, create an array of zeros with the same shape
     as the image plane of the input model. For the FGS modes, the
-    GuiderRawModel has only a regular dq array (no pixeldq or groupdq)
+    `~stdatamodels.jwst.datamodels.GuiderRawModel`
+    has only a regular DQ array (no ``pixeldq`` nor ``groupdq``).
 
     Parameters
     ----------
-    input_model : `~stdatamodels.jwst.datamodels.RampModel` \
-                  or `~stdatamodels.jwst.datamodels.GuiderRawModel`
+    input_model : `~stdatamodels.jwst.datamodels.RampModel` or \
+                  `~stdatamodels.jwst.datamodels.GuiderRawModel`
         Input datamodel.
     """
     input_shape = input_model.data.shape
@@ -90,10 +114,12 @@ def check_dimensions(input_model):
 
     else:  # RampModel
         if input_model.pixeldq.shape != input_shape[-2:]:
-            # If the shape is different, then the mask model should have
-            # a shape of (0,0).
-            # If that's the case, create the array
-            if input_model.pixeldq.shape == (0, 0):
+            # Make sure the pixeldq has 2 dimensions, matching the last two
+            # dimensions of the data array.
+            if (
+                input_model.pixeldq.shape == (0, 0)
+                or input_model.pixeldq.shape == input_model.data.shape
+            ):
                 input_model.pixeldq = np.zeros(input_shape[-2:], dtype=np.uint32)
             else:
                 log.error(f"Pixeldq array has the wrong shape: {input_model.pixeldq.shape}")

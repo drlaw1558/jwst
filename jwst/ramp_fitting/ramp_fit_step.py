@@ -69,25 +69,23 @@ def create_image_model(input_model, image_info):
     out_model : ImageModel
         The output ImageModel to be returned from the ramp fit step.
     """
-    data, dq, var_poisson, var_rnoise, err = image_info
-
     # Create output datamodel
-    out_model = datamodels.ImageModel(data.shape)
+    out_model = datamodels.ImageModel(image_info["slope"].shape)
 
     # ... and add all keys from input
     out_model.update(input_model)
 
     # Populate with output arrays
-    out_model.data = data
-    out_model.dq = dq
-    out_model.var_poisson = var_poisson
-    out_model.var_rnoise = var_rnoise
-    out_model.err = err
+    out_model.data = image_info["slope"]
+    out_model.dq = image_info["dq"]
+    out_model.var_poisson = image_info["var_poisson"]
+    out_model.var_rnoise = image_info["var_rnoise"]
+    out_model.err = image_info["err"]
 
     return out_model
 
 
-def create_integration_model(input_model, integ_info, int_times):
+def create_integration_model(input_model, integ_info, int_times, int_times_stripe=None):
     """
     Create an ImageModel from the computed arrays from ramp_fit.
 
@@ -99,27 +97,29 @@ def create_integration_model(input_model, integ_info, int_times):
         The ramp fitting arrays needed for the CubeModel for each integration.
     int_times : astropy.io.fits.fitsrec.FITS_rec or None
         Integration times.
+    int_times_stripe : astropy.io.fits.fitsrec.FITS_rec or None
+        Integration times table for superstripe data.
 
     Returns
     -------
     int_model : CubeModel
         The output CubeModel to be returned from the ramp fit step.
     """
-    data, dq, var_poisson, var_rnoise, err = integ_info
-
     # Create output datamodel
-    int_model = datamodels.CubeModel(data.shape)
+    int_model = datamodels.CubeModel(integ_info["slope"].shape)
 
     # ... and add all keys from input
     int_model.update(input_model)
 
     # Populate with output arrays
-    int_model.data = data
-    int_model.dq = dq
-    int_model.var_poisson = var_poisson
-    int_model.var_rnoise = var_rnoise
-    int_model.err = err
+    int_model.data = integ_info["slope"]
+    int_model.dq = integ_info["dq"]
+    int_model.var_poisson = integ_info["var_poisson"]
+    int_model.var_rnoise = integ_info["var_rnoise"]
+    int_model.err = integ_info["err"]
     int_model.int_times = int_times
+    if int_times_stripe is not None and len(int_times_stripe) > 0:
+        int_model.int_times_stripe = int_times_stripe
 
     return int_model
 
@@ -141,15 +141,15 @@ def create_optional_results_model(input_model, opt_info):
         The optional RampFitOutputModel to be returned from the ramp fit step.
     """
     opt_model = datamodels.RampFitOutputModel(
-        slope=opt_info[0],
-        sigslope=opt_info[1],
-        var_poisson=opt_info[2],
-        var_rnoise=opt_info[3],
-        yint=opt_info[4],
-        sigyint=opt_info[5],
-        pedestal=opt_info[6],
-        weights=opt_info[7],
-        crmag=opt_info[8],
+        slope=opt_info["slope"],
+        sigslope=opt_info["sigslope"],
+        var_poisson=opt_info["var_poisson"],
+        var_rnoise=opt_info["var_rnoise"],
+        yint=opt_info["yint"],
+        sigyint=opt_info["sigyint"],
+        pedestal=opt_info["pedestal"],
+        weights=opt_info["weights"],
+        crmag=opt_info["crmag"],
     )
 
     opt_model.meta.filename = input_model.meta.filename
@@ -236,6 +236,11 @@ class RampFitStep(Step):
 
         int_times = result.int_times
 
+        if result.int_times_stripe is not None and len(result.int_times_stripe) > 0:
+            int_times_stripe = result.int_times_stripe
+        else:
+            int_times_stripe = None
+
         # Set the DO_NOT_USE bit in the groupdq values for groups before firstgroup
         # and groups after lastgroup
         firstgroup = self.firstgroup
@@ -263,7 +268,23 @@ class RampFitStep(Step):
         # Save the OLS_C optional fit product, if it exists.
         if opt_info is not None:
             opt_model = create_optional_results_model(result, opt_info)
-            self.save_model(opt_model, "fitopt", output_file=self.opt_name)
+            if self.opt_name:
+                filename = self.opt_name
+            else:
+                filename = result.meta.filename
+            self.save_model(opt_model, "fitopt", output_file=filename)
+
+        # For the LIKELY algorithm, save chi-square array.
+        if self.save_opt and self.algorithm.lower() == "likely" and "chisq" in image_info:
+            # Create output datamodel
+            chisq_model = datamodels.ImageModel(image_info["chisq"].shape)
+            chisq_model.update(result)
+            chisq_model.data = image_info["chisq"]
+            if self.opt_name:
+                filename = self.opt_name
+            else:
+                filename = result.meta.filename
+            self.save_model(chisq_model, "likely_chisq", output_file=filename)
 
         # Create models from possibly updated info
         out_model, int_model = None, None
@@ -278,7 +299,7 @@ class RampFitStep(Step):
             ):
                 out_model = datamodels.IFUImageModel(out_model)
 
-            int_model = create_integration_model(result, integ_info, int_times)
+            int_model = create_integration_model(result, integ_info, int_times, int_times_stripe)
             int_model.meta.bunit_data = "DN/s"
             int_model.meta.bunit_err = "DN/s"
             int_model.meta.cal_step.ramp_fit = "COMPLETE"

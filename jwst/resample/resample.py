@@ -4,13 +4,17 @@ import re
 from pathlib import Path
 
 import numpy as np
-from spherical_geometry.polygon import SphericalPolygon
+from astropy.modeling import CompoundModel
+from astropy.modeling.projections import Projection
+from astropy.wcs.utils import celestial_frame_to_wcs
+from gwcs.fitswcs import FITSImagingWCSTransform
 from stcal.alignment import combine_sregions
 from stcal.resample import Resample
 from stcal.resample.utils import is_imaging_wcs
 from stdatamodels.jwst import datamodels
 from stdatamodels.jwst.datamodels.dqflags import pixel
 
+from jwst.assign_wcs import util as assign_wcs_util
 from jwst.associations.asn_from_list import asn_from_list
 from jwst.datamodels import ModelLibrary
 from jwst.model_blender.blender import ModelBlender
@@ -55,7 +59,9 @@ class ResampleImage(Resample):
         enable_var=True,
         report_var=True,
         compute_err=None,
-        asn_id=None,
+        propagate_dq=False,
+        pixmap_stepsize=1,
+        pixmap_order=1,
     ):
         """
         Initialize the ResampleImage object.
@@ -264,9 +270,20 @@ class ResampleImage(Resample):
                 At this time, output error array is not equivalent to
                 error propagation results.
 
-        asn_id : str, None, optional
-            The association id. The id is what appears in
-            the :ref:`asn-jwst-naming`.
+        propagate_dq : bool
+            If `True`, propagate DQ during resampling. DQ flags are propagated
+            by bitwise OR of all input DQ flags that contribute to a given
+            output pixel.
+
+        pixmap_stepsize : float, optional
+            Indicates the spacing in pixels
+            at which the WCS is evaluated when computing the pixel map.
+            WCS coordinates of the full pixel map is computed by interpolating over
+            this sparse pixel map when ``pixmap_stepsize > 1``. Larger step sizes result in
+            faster performance at the cost of accuracy. Default is 1.
+
+        pixmap_order : int, optional
+            Interpolating spline order for pixel map computation. Must be 1 or 3. Default is 1.
         """
         self.input_models = input_models
         self.output_jwst_model = None
@@ -288,8 +305,6 @@ class ResampleImage(Resample):
                     "meta.filename",
                 ]
             )
-
-        self.asn_id = asn_id
 
         # check wcs_pars has supported keywords:
         if wcs_pars is None:
@@ -340,6 +355,9 @@ class ResampleImage(Resample):
             enable_ctx=enable_ctx,
             enable_var=enable_var,
             compute_err=compute_err,
+            propagate_dq=propagate_dq,
+            pixmap_stepsize=pixmap_stepsize,
+            pixmap_order=pixmap_order,
         )
 
     def input_model_to_dict(self, model, weight_type, enable_var, compute_err):
@@ -363,7 +381,10 @@ class ResampleImage(Resample):
             A dictionary of keywords and values expected by `stcal.resample`.
         """
         return input_jwst_model_to_dict(
-            model=model, weight_type=weight_type, enable_var=enable_var, compute_err=compute_err
+            model=model,
+            weight_type=weight_type,
+            enable_var=enable_var,
+            compute_err=compute_err,
         )
 
     def create_output_jwst_model(self, ref_input_model=None):
@@ -401,14 +422,21 @@ class ResampleImage(Resample):
         """
         model.data = info_dict["data"]
         model.wht = info_dict["wht"]
-        if self._enable_ctx:
+
+        if self.enable_ctx:
             model.con = info_dict["con"]
-        if self._compute_err:
+
+        if self.propagate_dq:
+            model.dq = info_dict["dq"]
+
+        if self.compute_err:
             model.err = info_dict["err"]
+
         elif model.meta.hasattr("bunit_err"):
             # bunit_err metadata is mapped to the err extension, so it must be removed
             # in order to fully remove the err extension.
             del model.meta.bunit_err
+
         if self._enable_var and self._report_var:
             model.var_rnoise = info_dict["var_rnoise"]
             model.var_flat = info_dict["var_flat"]
@@ -663,22 +691,71 @@ class ResampleImage(Resample):
             if regex.match(key):
                 del model.meta.wcsinfo.instance[key]
 
-        # Write new PC-matrix-based WCS based on GWCS model
+        # Write FITS WCS parameters based on GWCS model to wcsinfo:
         transform = model.meta.wcs.forward_transform
-        model.meta.wcsinfo.crpix1 = transform.crpix[0] + 1
-        model.meta.wcsinfo.crpix2 = transform.crpix[1] + 1
-        model.meta.wcsinfo.cdelt1 = transform.cdelt[0]
-        model.meta.wcsinfo.cdelt2 = transform.cdelt[1]
-        model.meta.wcsinfo.ra_ref = transform.crval[0]
-        model.meta.wcsinfo.dec_ref = transform.crval[1]
-        model.meta.wcsinfo.crval1 = model.meta.wcsinfo.ra_ref
-        model.meta.wcsinfo.crval2 = model.meta.wcsinfo.dec_ref
-        model.meta.wcsinfo.pc1_1 = transform.pc[0][0]
-        model.meta.wcsinfo.pc1_2 = transform.pc[0][1]
-        model.meta.wcsinfo.pc2_1 = transform.pc[1][0]
-        model.meta.wcsinfo.pc2_2 = transform.pc[1][1]
-        model.meta.wcsinfo.ctype1 = "RA---TAN"
-        model.meta.wcsinfo.ctype2 = "DEC--TAN"
+
+        if isinstance(transform, FITSImagingWCSTransform):
+            prj_code = transform.projection.prjprm.code
+            w = celestial_frame_to_wcs(
+                frame=model.meta.wcs.pipeline[-1].frame.reference_frame,
+                projection=prj_code,
+            )
+
+            model.meta.wcsinfo.crpix1 = transform.crpix[0] + 1
+            model.meta.wcsinfo.crpix2 = transform.crpix[1] + 1
+            model.meta.wcsinfo.cdelt1 = transform.cdelt[0]
+            model.meta.wcsinfo.cdelt2 = transform.cdelt[1]
+            model.meta.wcsinfo.crval1 = transform.crval[0]
+            model.meta.wcsinfo.crval2 = transform.crval[1]
+            model.meta.wcsinfo.pc1_1 = transform.pc[0][0]
+            model.meta.wcsinfo.pc1_2 = transform.pc[0][1]
+            model.meta.wcsinfo.pc2_1 = transform.pc[1][0]
+            model.meta.wcsinfo.pc2_2 = transform.pc[1][1]
+            model.meta.wcsinfo.ctype1 = w.wcs.ctype[0]
+            model.meta.wcsinfo.ctype2 = w.wcs.ctype[1]
+            model.meta.wcsinfo.cunit1 = str(model.meta.wcs.output_frame.unit[0])
+            model.meta.wcsinfo.cunit2 = str(model.meta.wcs.output_frame.unit[1])
+            model.meta.wcsinfo.radesys = w.wcs.radesys
+
+        else:
+            log.warning(
+                "Custom 'output_wcs' is not using 'FITSImagingWCSTransform'. "
+                "Setting wcsinfo by fitting a linear FITS WCS to the resampled "
+                "image WCS. This may not produce correct WCS parameters if "
+                "custom 'output_wcs' contains distortions."
+            )
+            # we need to find projection type:
+            if not isinstance(transform, CompoundModel):
+                raise TypeError("Expected the output WCS transform to be a CompoundModel.")
+
+            prj_code = None
+            for m in transform.traverse_postorder():
+                if isinstance(m, Projection):
+                    prj_code = m.prjprm.code
+                    break
+            else:
+                raise RuntimeError(
+                    "Custom 'output_wcs' does not match expected GWCS "
+                    "structure for an imaging WCS: could not find a "
+                    "Projection model in the output WCS transform."
+                )
+
+            kwargs = {}
+            if model.meta.wcs.bounding_box is None:
+                kwargs["bounding_box"] = (
+                    (-0.5, model.data.shape[1] - 0.5),
+                    (-0.5, model.data.shape[0] - 0.5),
+                )
+
+            assign_wcs_util.update_fits_wcsinfo(
+                model,
+                degree=1,
+                max_inv_pix_error=None,
+                inv_degree=0,
+                npoints=12,
+                projection=prj_code,
+                **kwargs,
+            )
 
         # Remove no longer relevant WCS keywords
         rm_keys = ["v2_ref", "v3_ref", "ra_ref", "dec_ref", "roll_ref", "v3yangle", "vparity"]
@@ -837,90 +914,6 @@ def _get_boundary_points(xmin, xmax, ymin, ymax, dx=None, dy=None, shrink=0):
     center = (0.5 * (xmin + xmax), 0.5 * (ymin + ymax))
 
     return x, y, area, center, b, r, t, l
-
-
-def compute_image_pixel_area(wcs):
-    """
-    Compute pixel area in steradians from a WCS.
-
-    Parameters
-    ----------
-    wcs : gwcs.wcs.WCS
-        A WCS object.
-
-    Returns
-    -------
-    float
-        Pixel area in steradians.
-    """
-    if wcs.array_shape is None:
-        raise ValueError("WCS must have array_shape attribute set.")
-
-    valid_polygon = False
-    spatial_idx = np.where(np.array(wcs.output_frame.axes_type) == "SPATIAL")[0]
-
-    ny, nx = wcs.array_shape
-    ((xmin, xmax), (ymin, ymax)) = wcs.bounding_box
-
-    xmin = max(0, int(xmin + 0.5))
-    xmax = min(nx - 1, int(xmax - 0.5))
-    ymin = max(0, int(ymin + 0.5))
-    ymax = min(ny - 1, int(ymax - 0.5))
-    if xmin > xmax:
-        (xmin, xmax) = (xmax, xmin)
-    if ymin > ymax:
-        (ymin, ymax) = (ymax, ymin)
-
-    k = 0
-    dxy = [1, -1, -1, 1]
-    ra, dec, center = np.nan, np.nan, (np.nan, np.nan)
-    while xmin < xmax and ymin < ymax:
-        try:
-            x, y, image_area, center, b, r, t, l = _get_boundary_points(
-                xmin=xmin,
-                xmax=xmax,
-                ymin=ymin,
-                ymax=ymax,
-                dx=min((xmax - xmin) // 4, 15),
-                dy=min((ymax - ymin) // 4, 15),
-            )
-        except ValueError:
-            return None
-
-        world = wcs(x, y)
-        ra = world[spatial_idx[0]]
-        dec = world[spatial_idx[1]]
-
-        limits = [ymin, xmax, ymax, xmin]
-
-        for _ in range(4):
-            sl = [b, r, t, l][k]
-            if not (np.all(np.isfinite(ra[sl])) and np.all(np.isfinite(dec[sl]))):
-                limits[k] += dxy[k]
-                k = (k + 1) % 4
-                break
-            k = (k + 1) % 4
-        else:
-            valid_polygon = True
-            break
-
-        ymin, xmax, ymax, xmin = limits
-
-    if not valid_polygon:
-        return None
-
-    world = wcs(*center)
-    wcenter = (world[spatial_idx[0]], world[spatial_idx[1]])
-
-    sky_area = SphericalPolygon.from_radec(ra, dec, center=wcenter).area()
-    if sky_area > 2 * np.pi:
-        log.warning(
-            "Unexpectedly large computed sky area for an image. Setting area to: 4*Pi - area"
-        )
-        sky_area = 4 * np.pi - sky_area
-    pix_area = sky_area / image_area
-
-    return pix_area
 
 
 def copy_asn_info_from_library(library, output_model):

@@ -1,7 +1,6 @@
 """Public common step definition for OutlierDetection processing."""
 
 import logging
-from functools import partial
 
 from stdatamodels import filetype
 from stdatamodels.jwst import datamodels
@@ -56,6 +55,8 @@ class OutlierDetectionStep(Step):
         good_bits = string(default="~DO_NOT_USE")  # DQ flags to allow
         search_output_file = boolean(default=False)
         in_memory = boolean(default=True) # in_memory flag ignored if run within the pipeline; set at pipeline level instead
+        pixmap_stepsize = float(default=1.0)  # Interpolation step size for pixel map; interpolation is used for stepsize > 1
+        pixmap_order = integer(default=1)  # Spline order for pixel mapping, must be 1 or 3
     """  # noqa: E501
 
     def process(self, input_data):
@@ -136,6 +137,8 @@ class OutlierDetectionStep(Step):
                 self.fillval,
                 self.in_memory,
                 self.make_output_path,
+                self.pixmap_stepsize,
+                self.pixmap_order,
             )
         elif mode == "spec":
             result_models = spec.detect_outliers(
@@ -220,22 +223,8 @@ class OutlierDetectionStep(Step):
         if isinstance(input_models, (str, dict)):
             input_models = datamodels.open(input_models, asn_n_members=1)
 
-        # Setup output path naming if associations are involved.
-        try:
-            if isinstance(input_models, ModelLibrary):
-                asn_id = input_models.asn["asn_id"]
-            elif isinstance(input_models, ModelContainer):
-                asn_id = input_models.asn_table["asn_id"]
-            else:
-                asn_id = input_models.meta.asn_table.asn_id
-        except (AttributeError, KeyError):
-            asn_id = None
-
-        if asn_id is None:
-            asn_id = self.search_attr("asn_id")
-        if asn_id is not None:
-            _make_output_path = self.search_attr("_make_output_path", parent_first=True)
-
-            self._make_output_path = partial(_make_output_path, asn_id=asn_id)
+        # Set up output path name to include the ASN ID if available
+        asn_id = self.add_asn_id_to_output_name(input_models)
         log.info(f"Outlier Detection asn_id: {asn_id}")
+
         return

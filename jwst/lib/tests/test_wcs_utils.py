@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from astropy import coordinates as coord
 from astropy import units as u
 from astropy.modeling.models import Identity, Mapping, Scale, Shift
@@ -80,6 +81,15 @@ def test_get_wavelengths():
     assert_allclose(wl, wl_og)
 
 
+@pytest.mark.parametrize("arr_init", [np.array([]), np.array(1), np.ones((10))])
+def test_get_wavelengths_bad_shape(arr_init):
+    model = create_model()
+
+    model.data = arr_init
+    with pytest.raises(ValueError, match=".*cannot compute wavelengths"):
+        get_wavelengths(model)
+
+
 def test_get_wavelengths_soss():
     # create a mock SlitModel
     model = create_model()
@@ -87,15 +97,19 @@ def test_get_wavelengths_soss():
     del model.wavelength
     model.meta.exposure.type = "NIS_SOSS"
 
-    wcs = model.meta.wcs
-    new_wcs = NirissSOSSModel(
+    # mock a SOSS wcs
+    soss_transform = NirissSOSSModel([1], [model.meta.wcs])
+    detector = cf.Frame2D(name="detector")
+    world = cf.CompositeFrame(
         [
-            1,
+            cf.CelestialFrame(name="icrs", axes_order=(0, 1), reference_frame=coord.ICRS()),
+            cf.SpectralFrame(
+                name="spectral", axes_order=(2,), unit=(u.micron,), axes_names=("wavelength",)
+            ),
         ],
-        [
-            wcs,
-        ],
+        name="world",
     )
+    new_wcs = wcs.WCS([(detector, soss_transform), (world, None)])
     model.meta.wcs = new_wcs
 
     # calculate what the wavelength array should be

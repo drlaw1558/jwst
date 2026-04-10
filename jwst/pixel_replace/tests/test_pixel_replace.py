@@ -1,8 +1,11 @@
 import os
 from glob import glob
 
+import astropy.units as u
+import gwcs
 import numpy as np
 import pytest
+from astropy.modeling.models import Const1D, Mapping
 from stdatamodels.jwst import datamodels
 from stdatamodels.jwst.datamodels.dqflags import pixel as flags
 
@@ -23,11 +26,13 @@ def cal_data(shape, bad_idx, dispaxis=1, model="slit"):
 
     # Set the data and error arrays to all 1s except one bad pixel
     # to correct at the middle of the array
-    model.data[:] = 1.0
-    model.err[:] = 1.0
-    model.var_poisson[:] = 1.0
-    model.var_rnoise[:] = 1.0
-    model.var_flat[:] = 1.0
+    ones = np.ones(shape, dtype=float)
+    model.data = ones.copy()
+    model.dq = model.get_default("dq")
+    model.err = ones.copy()
+    model.var_poisson = ones.copy()
+    model.var_rnoise = ones.copy()
+    model.var_flat = ones.copy()
 
     bad_flag = flags["DO_NOT_USE"] + flags["OTHER_BAD_PIXEL"]
     model.data[bad_idx] = np.nan
@@ -118,15 +123,21 @@ def miri_lrs():
 
 def miri_mrs():
     shape = (20, 20)
-
-    def mock_transform(*args):
-        return None, np.full(shape, 1), None
-
     bad_idx = (10, 10)
     model = cal_data(shape=shape, bad_idx=bad_idx, dispaxis=2, model="ifu")
     model.meta.instrument.name = "MIRI"
     model.meta.exposure.type = "MIR_MRS"
-    model.meta.wcs = {"transform": mock_transform}
+
+    # Mock a wcs that just returns 1 for alpha, beta, lam
+    transform = Mapping((0, 1, 1), n_inputs=2) | Const1D(1) & Const1D(1) & Const1D(1)
+    output_frame = gwcs.CompositeFrame(
+        [
+            gwcs.Frame2D(name="alpha_beta_spatial", axes_order=(0, 1), unit=(u.arcsec, u.arcsec)),
+            gwcs.SpectralFrame(name="lam", axes_order=(2,), unit=(u.um,)),
+        ],
+        name="alpha_beta",
+    )
+    model.meta.wcs = gwcs.WCS([(gwcs.Frame2D(name="detector"), transform), (output_frame, None)])
     return model, bad_idx
 
 
@@ -368,3 +379,19 @@ def test_skip_unexpected_type_in_container():
     # Input is not modified
     assert result[0] is not bad_model
     assert bad_model.meta.cal_step.pixel_replace is None
+
+
+@pytest.mark.parametrize("variance", ["var_poisson", "var_rnoise", "var_flat"])
+@pytest.mark.parametrize("algorithm", ["fit_profile", "mingrad"])
+def test_unset_variances(algorithm, variance):
+    """
+    Test that the step handles unset variance arrays gracefully.
+
+    They should be left as None and raise no errors.
+    """
+    input_model, bad_idx = nirspec_tso()
+    # Set variance to None
+    input_model[variance] = None
+
+    result = PixelReplaceStep.call(input_model, algorithm=algorithm)
+    assert result[variance] is None

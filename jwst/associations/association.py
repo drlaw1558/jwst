@@ -300,7 +300,7 @@ class Association(MutableMapping):
         -----
         The serialized object can be in any format
         supported by the registered I/O routines. For example, for
-        JSON and YAML formats, the input can be either a string or
+        JSON format, the input can be either a string or
         a file object containing the string.
         """
         if fmt is None:
@@ -517,7 +517,7 @@ class Association(MutableMapping):
         -----
         This is a low-level shortcut into adding members, such as file names,
         to an association. All defined shortcuts and other initializations are
-        by-passed, resulting in a potentially unusable association.
+        bypassed, resulting in a potentially unusable association.
         """
         try:
             self["members"].update(items)

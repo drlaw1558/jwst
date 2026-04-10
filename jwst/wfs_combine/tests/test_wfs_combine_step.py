@@ -15,6 +15,8 @@ def wfs_association(tmp_path_factory):
     imsize = 10
     tmp_path = tmp_path_factory.mktemp("wfs")
     im1 = datamodels.ImageModel((imsize, imsize))
+    im1.dq = im1.get_default("dq")
+    im1.err = im1.get_default("err")
     im1.meta.wcsinfo = {
         "dec_ref": 11.99875540218638,
         "ra_ref": 22.02351763251896,
@@ -47,7 +49,7 @@ def wfs_association(tmp_path_factory):
 
     asn = asn_from_list.asn_from_list([path1, path2], product_name="combined", rule=DMS_Level3_Base)
     asn.data["program"] = "00024"
-    asn.data["asn_type"] = "wfs-image2"
+    asn.data["asn_type"] = "image2"
     asn.sequence = 1
     with warnings.catch_warnings():
         warnings.filterwarnings(

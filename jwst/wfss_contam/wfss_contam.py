@@ -32,7 +32,7 @@ def _find_matching_simul_slit(slit, simul_slit_sids, simul_slit_orders):
 
     Parameters
     ----------
-    slit : `~jwst.datamodels.SlitModel`
+    slit : `~stdatamodels.jwst.datamodels.SlitModel`
         Source slit model
     simul_slit_sids : list
         List of source IDs for simulated slits
@@ -64,7 +64,7 @@ def _cut_frame_to_match_slit(contam, slit):
     ----------
     contam : 2D array
         Contamination image for the full grism exposure
-    slit : `~jwst.datamodels.SlitModel`
+    slit : `~stdatamodels.jwst.datamodels.SlitModel`
         Source slit model
 
     Returns
@@ -99,14 +99,14 @@ def match_backplane_prefer_first(slit0, slit1):
 
     Parameters
     ----------
-    slit0 : `~jwst.datamodels.SlitModel`
+    slit0 : `~stdatamodels.jwst.datamodels.SlitModel`
         Slit model for the first slit, which is used as reference.
-    slit1 : `~jwst.datamodels.SlitModel`
+    slit1 : `~stdatamodels.jwst.datamodels.SlitModel`
         Slit model for the second slit, which is reshaped to match slit0.
 
     Returns
     -------
-    slit0, slit1 : `~jwst.datamodels.SlitModel`
+    slit0, slit1 : `~stdatamodels.jwst.datamodels.SlitModel`
         Reshaped slit models slit0, slit1.
     """
     data0 = slit0.data
@@ -126,67 +126,20 @@ def match_backplane_prefer_first(slit0, slit1):
             f"order {slit0.meta.wcsinfo.spectral_order}. "
             "setting contamination correction to zero for that slit."
         )
-
-    backplane1[i0:i1, j0:j1] = data1[i0:i1, j0:j1]
+    di = i0 - y1  # offset into data1's own row axis
+    dj = j0 - x1  # offset into data1's own col axis
+    backplane1[i0:i1, j0:j1] = data1[di : di + (i1 - i0), dj : dj + (j1 - j0)]
 
     slit1.data = backplane1
+    # Anticipate slits carrying around wavelength arrays for future changes
+    if getattr(slit1, "wavelength", None) is not None and slit1.wavelength.shape == data1.shape:
+        wl_backplane = np.zeros_like(data0)
+        wl_backplane[i0:i1, j0:j1] = slit1.wavelength[di : di + (i1 - i0), dj : dj + (j1 - j0)]
+        slit1.wavelength = wl_backplane
     slit1.xstart = slit0.xstart
     slit1.ystart = slit0.ystart
     slit1.xsize = slit0.xsize
     slit1.ysize = slit0.ysize
-
-    return slit0, slit1
-
-
-def match_backplane_encompass_both(slit0, slit1):
-    """
-    Put data from the two slits into a common backplane, encompassing both.
-
-    Slits are zero-padded where their new extent does not overlap with the original data.
-
-    Parameters
-    ----------
-    slit0, slit1 : `~jwst.datamodels.SlitModel`
-        Slit model for the first and second slit.
-
-    Returns
-    -------
-    slit0, slit1 : `~jwst.datamodels.SlitModel`
-        Reshaped slit models slit0, slit1.
-    """
-    data0 = slit0.data
-    data1 = slit1.data
-
-    shape = (max(data0.shape[0], data1.shape[0]), max(data0.shape[1], data1.shape[1]))
-    xmin = min(slit0.xstart, slit1.xstart)
-    ymin = min(slit0.ystart, slit1.ystart)
-    shape = (
-        max(
-            slit0.xsize + slit0.xstart - xmin,
-            slit1.xsize + slit1.xstart - xmin,
-        ),
-        max(
-            slit0.ysize + slit0.ystart - ymin,
-            slit1.ysize + slit1.ystart - ymin,
-        ),
-    )
-    x0 = slit0.xstart - xmin
-    y0 = slit0.ystart - ymin
-    x1 = slit1.xstart - xmin
-    y1 = slit1.ystart - ymin
-
-    backplane0 = np.zeros(shape).T
-    backplane0[y0 : y0 + data0.shape[0], x0 : x0 + data0.shape[1]] = data0
-    backplane1 = np.zeros(shape).T
-    backplane1[y1 : y1 + data1.shape[0], x1 : x1 + data1.shape[1]] = data1
-
-    slit0.data = backplane0
-    slit1.data = backplane1
-    for slit in [slit0, slit1]:
-        slit.xstart = xmin
-        slit.ystart = ymin
-        slit.xsize = shape[0]
-        slit.ysize = shape[1]
 
     return slit0, slit1
 
@@ -356,11 +309,13 @@ def contam_corr(
 
     Parameters
     ----------
-    input_model : `~jwst.datamodels.MultiSlitModel`
-        Input data model containing 2D spectral cutouts
-    waverange : `~jwst.datamodels.WavelengthrangeModel`
+    input_model : `~stdatamodels.jwst.datamodels.MultiSlitModel`
+        Input data model containing 2D spectral cutouts. May be modified by processing:
+        make a copy before calling this function, if needed.
+    waverange : `~stdatamodels.jwst.datamodels.WavelengthrangeModel`
         Wavelength range reference file model
-    photom : `~jwst.datamodels.NrcWfssPhotomModel` or `~jwst.datamodels.NisWfssPhotomModel`
+    photom : `~stdatamodels.jwst.datamodels.NrcWfssPhotomModel` or \
+             `~stdatamodels.jwst.datamodels.NisWfssPhotomModel`
         Photom (flux cal) reference file model
     max_cores : str or int
         Number of cores to use for multiprocessing. If set to 'none'
@@ -385,11 +340,11 @@ def contam_corr(
 
     Returns
     -------
-    output_model : `~jwst.datamodels.MultiSlitModel`
+    output_model : `~stdatamodels.jwst.datamodels.MultiSlitModel`
         A copy of the input_model that has been corrected
-    simul_model : `~jwst.datamodels.ImageModel`
+    simul_model : `~stdatamodels.jwst.datamodels.ImageModel`
         Full-frame simulated image of the grism exposure
-    contam_model : `~jwst.datamodels.MultiSlitModel`
+    contam_model : `~stdatamodels.jwst.datamodels.MultiSlitModel`
         Contamination estimate images for each source slit
     """
     max_available_cores = multiprocessing.cpu_count()
@@ -434,10 +389,8 @@ def contam_corr(
     # filter needs to come from the PUPIL keyword value.
     if input_model.meta.instrument.name == "NIRISS":
         filter_name = pupil_kwd
-        phot_per_lam = False
     else:
         filter_name = filter_kwd
-        phot_per_lam = True
 
     # Read the source catalog to perform magnitude-based source selection later
     # mag limit will be scaled according to order 1 sensitivity
@@ -458,7 +411,6 @@ def contam_corr(
         max_cpu=ncpus,
         max_pixels_per_chunk=max_pixels_per_chunk,
         oversample_factor=oversample_factor,
-        phot_per_lam=phot_per_lam,
     )
 
     no_sources = True
@@ -510,12 +462,11 @@ def contam_corr(
     # Initialize output multislitmodel
     output_model = datamodels.MultiSlitModel()
 
-    # Copy over matching slits
-    good_slits = [
-        datamodels.SlitModel(slit.instance).copy()
-        for slit in input_model.slits
-        if slit.source_id in obs.source_ids
-    ]
+    # Copy over matching slits.
+    # Note that this makes a reference to input slits, not a deep copy,
+    # so the input data may be modified by this function.  The input data is
+    # copied in the calling step, as needed.
+    good_slits = [slit for slit in input_model.slits if slit.source_id in obs.source_ids]
     output_model.slits.extend(good_slits)
 
     # Loop over all slits/sources to subtract contaminating spectra

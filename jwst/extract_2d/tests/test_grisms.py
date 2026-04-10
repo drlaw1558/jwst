@@ -150,6 +150,8 @@ def create_wfss_image(pupil, filtername="F444W"):
     hdul = create_hdul(exptype="NRC_WFSS", filtername=filtername, pupil=pupil, wcskeys=wcs_wfss_kw)
     hdul["sci"].data = np.ones((hdul[0].header["SUBSIZE1"], hdul[0].header["SUBSIZE2"]))
     im = ImageModel(hdul)
+    im.dq = im.get_default("dq")
+    im.err = im.get_default("err")
     return AssignWcsStep.call(im)
 
 
@@ -333,7 +335,8 @@ def test_create_specific_orders():
         assert [1] == list(ids[0].order_bounding.keys())
 
 
-def test_extract_tso_subarray():
+@pytest.mark.parametrize("subarray", [True, False])
+def test_extract_tso_subarray(subarray):
     """Test extraction of a TSO object.
 
     NRC_TSGRISM mode doesn't use the catalog since
@@ -342,7 +345,7 @@ def test_extract_tso_subarray():
     extraction with a small CubeModel
     """
 
-    wcsimage = create_tso_wcsimage(subarray=True)
+    wcsimage = create_tso_wcsimage(subarray=subarray)
     refs = get_reference_files(wcsimage)
     outmodel = extract_tso_object(wcsimage, reference_files=refs)
     assert isinstance(outmodel, SlitModel)
@@ -352,7 +355,10 @@ def test_extract_tso_subarray():
     assert outmodel.xstart > 0
     assert outmodel.ystart > 0
     assert outmodel.meta.wcsinfo.spectral_order == 1
-
+    wcs_test_xpix = 6
+    np.testing.assert_allclose(
+        wcs_test_xpix, outmodel.meta.wcs.invert(*outmodel.meta.wcs(wcs_test_xpix, 10))[0], atol=2e-2
+    )
     # These are the sizes of the valid wavelength regions
     # not the size of the cutout
     assert outmodel.ysize > 0
@@ -417,11 +423,11 @@ def test_radec_to_source_ids(source_ids):
         "data/step_SourceCatalogStep_cat.ecsv", package="jwst.extract_2d.tests"
     )
     # object 9
-    ra1 = 53.13773660029234
-    dec1 = -27.80858320887945
+    ra1 = 53.1377366
+    dec1 = -27.80858321
     # object 19
-    ra2 = 53.153053283691406
-    dec2 = -27.810455322265625
+    ra2 = 53.15786615
+    dec2 = -27.81442243
 
     # single RA/Dec
     source_ids_1 = radec_to_source_ids(
@@ -445,12 +451,22 @@ def test_radec_to_source_ids(source_ids):
         assert 19 in source_ids_2
 
 
-def test_radec_to_source_ids_bad_radec():
+def test_radec_to_source_ids_radec_length_mismatch():
     source_catalog = get_pkg_data_filename(
         "data/step_SourceCatalogStep_cat.ecsv", package="jwst.extract_2d.tests"
     )
     with pytest.raises(ValueError, match="source_ra and source_dec must have the same length."):
         radec_to_source_ids(source_catalog, source_ra=[0.0, 0.0], source_dec=[0.0])
+
+
+def test_radec_to_source_ids_radec_without_both():
+    source_catalog = get_pkg_data_filename(
+        "data/step_SourceCatalogStep_cat.ecsv", package="jwst.extract_2d.tests"
+    )
+    with pytest.raises(ValueError, match="source_ra must be provided if source_dec is provided."):
+        radec_to_source_ids(source_catalog, source_dec=[0.0])
+    with pytest.raises(ValueError, match="source_dec must be provided if source_ra is provided."):
+        radec_to_source_ids(source_catalog, source_ra=[0.0])
 
 
 @pytest.mark.parametrize("source_ids_in", [None, [9, 19], 25])
@@ -463,6 +479,18 @@ def test_radec_to_source_ids_none(source_ids_in):
         assert source_ids is None
     else:
         np.testing.assert_allclose(source_ids, np.atleast_1d(source_ids_in))
+
+
+def test_radec_to_source_ids_no_match():
+    source_catalog = get_pkg_data_filename(
+        "data/step_SourceCatalogStep_cat.ecsv", package="jwst.extract_2d.tests"
+    )
+    ra = 0.0
+    dec = 0.0
+    with pytest.raises(
+        ValueError, match="source_ra and source_dec were provided, but no sources were found"
+    ):
+        radec_to_source_ids(source_catalog, source_ra=[ra], source_dec=[dec], max_sep=0.5)
 
 
 @pytest.mark.filterwarnings("ignore: Card is too long")
@@ -540,7 +568,7 @@ def test_wfss_extract_custom_height():
     object 26 should have order 2 excluded at order 1 partial
     """
     imwcs, refs = setup_image_cat()
-    imwcs.meta.wcsinfo._instance["dispersion_direction"] = 1
+    imwcs.meta.wcsinfo.instance["dispersion_direction"] = 1
     extract_orders = [1]  # just extract the first order
     test_boxes = create_grism_bbox(
         imwcs, refs, mmag_extract=99.0, extract_orders=extract_orders, wfss_extract_half_height=5

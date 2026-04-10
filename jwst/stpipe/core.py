@@ -1,6 +1,8 @@
 """JWST-specific Step and Pipeline base classes."""
 
 import logging
+from copy import deepcopy
+from functools import partial
 from pathlib import Path
 
 from stdatamodels.jwst import datamodels
@@ -19,7 +21,7 @@ __all__ = ["JwstStep", "JwstPipeline"]
 
 
 class JwstStep(_Step):
-    """A JWST pipeline step."""
+    """A JWST pipeline step (``jwst.stpipe.Step``)."""
 
     spec = """
     output_ext = string(default='.fits')  # Output file type
@@ -218,7 +220,7 @@ class JwstStep(_Step):
                     # It is assumed the provided class is appropriate for the input.
                     input_models = open_as_type(init, **kwargs)
                 else:
-                    input_models = datamodels.open(init)
+                    input_models = datamodels.open(init, **kwargs)
             else:
                 # Return the filename or path -
                 # the calling code will handle opening it as needed.
@@ -250,13 +252,62 @@ class JwstStep(_Step):
 
         return input_models
 
+    def add_asn_id_to_output_name(self, models):
+        """
+        Set up output path name to include the association ID.
+
+        The input models are checked for an ASN ID in either a ModelContainer
+        ``asn_table`` attribute or a ModelLibrary ``asn`` attribute.
+
+        If not found, the current step and its parents are searched
+        for an ``asn_id`` attribute.
+
+        If an ASN ID is found, the ``_make_output_path`` function is updated
+        to include it in output filenames.
+
+        If no ASN ID is found, ``_make_output_path`` is updated to pass
+        ``asn_id=None``.  This will override any previously passed ASN IDs, so
+        that no ASN ID appears in the output filename.
+
+        Parameters
+        ----------
+        models : `~stdatamodels.jwst.datamodels.JwstDataModel`, \
+                 `~jwst.datamodels.container.ModelContainer`,  or \
+                 `~jwst.datamodels.library.ModelLibrary`
+            The model or models to search for an ASN ID.
+
+        Returns
+        -------
+        asn_id : str or None
+            The ASN ID, as found in the models or step.
+        """
+        # Check the input models for an association ID
+        try:
+            if isinstance(models, ModelLibrary):
+                asn_id = models.asn["asn_id"]
+            elif isinstance(models, ModelContainer):
+                asn_id = models.asn_table["asn_id"]
+            else:
+                asn_id = None
+        except (AttributeError, KeyError):
+            asn_id = None
+
+        if asn_id is None:
+            # This will return None if not found
+            asn_id = self.search_attr("asn_id")
+
+        _make_output_path = self.search_attr("_make_output_path", parent_first=True)
+        self._make_output_path = partial(_make_output_path, asn_id=asn_id)
+
+        return asn_id
+
     def finalize_result(self, result, reference_files_used):
         """
         Update the result with the software version and reference files used.
 
         Parameters
         ----------
-        result : `~stdatamodels.DataModel`
+        result : `~stdatamodels.jwst.datamodels.JwstDataModel`
             The output data model to be updated.
         reference_files_used : list of tuple
             The names and file paths of reference files used.
@@ -279,7 +330,15 @@ class JwstStep(_Step):
             if self.class_alias:
                 if not hasattr(result, "cal_logs"):
                     result.cal_logs = {}
-                setattr(result.cal_logs, self.class_alias, self._log_records)
+
+                if self.parent is None or not self.parent.class_alias:
+                    setattr(result.cal_logs, self.class_alias, self._log_records)
+                else:  # Capture step log as pipeline log
+                    setattr(
+                        result.cal_logs,
+                        self.parent.class_alias,
+                        deepcopy(self.parent._log_records),  # noqa: SLF001
+                    )
 
     def remove_suffix(self, name):
         """
@@ -319,7 +378,7 @@ class JwstStep(_Step):
 
 class JwstPipeline(Pipeline, JwstStep):
     """
-    A JWST pipeline.
+    A JWST pipeline (``jwst.stpipe.Pipeline``).
 
     JwstPipeline needs to inherit from Pipeline, but also
     be a subclass of JwstStep so that it will pass checks
@@ -332,7 +391,7 @@ class JwstPipeline(Pipeline, JwstStep):
 
         Parameters
         ----------
-        result : `~stdatamodels.DataModel`
+        result : `~stdatamodels.jwst.datamodels.JwstDataModel`
             The output data model to be updated.
         _reference_files_used : list of tuple
             The names and file paths of reference files used.
@@ -346,10 +405,5 @@ class JwstPipeline(Pipeline, JwstStep):
             if self.class_alias:
                 if not hasattr(result, "cal_logs"):
                     result.cal_logs = {}
-
-                # remove the step logs as they're captured by the pipeline log
-                for _, step in self.step_defs.items():
-                    if hasattr(result.cal_logs, step.class_alias):
-                        delattr(result.cal_logs, step.class_alias)
 
                 setattr(result.cal_logs, self.class_alias, self._log_records)

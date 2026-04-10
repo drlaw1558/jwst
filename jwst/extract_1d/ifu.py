@@ -2,8 +2,10 @@ import logging
 import warnings
 
 import numpy as np
+import photutils
 from astropy import stats
 from astropy.stats import sigma_clipped_stats as sigclip
+from astropy.utils import minversion
 from photutils.aperture import (
     CircularAnnulus,
     CircularAperture,
@@ -108,10 +110,10 @@ def ifu_extract1d(
 
     if input_model.meta.instrument.name == "MIRI":
         output_model = datamodels.MRSMultiSpecModel()
-        spec_dtype = datamodels.MRSSpecModel().spec_table.dtype
+        spec_dtype = datamodels.MRSSpecModel().get_dtype("spec_table")
     else:
         output_model = datamodels.MultiSpecModel()
-        spec_dtype = datamodels.SpecModel().spec_table.dtype
+        spec_dtype = datamodels.SpecModel().get_dtype("spec_table")
 
     output_model.update(input_model, only="PRIMARY")
 
@@ -659,7 +661,11 @@ def extract_ifu(input_model, source_type, extract_params):
                 vals = sources["flux"].value
                 # Identify brightest source as the target
                 indx = np.argmax(vals)
-                x_center, y_center = sources[indx]["xcentroid"], sources[indx]["ycentroid"]
+
+                if minversion(photutils, "2.3.1.dev"):
+                    x_center, y_center = sources[indx]["x_centroid"], sources[indx]["y_centroid"]
+                else:
+                    x_center, y_center = sources[indx]["xcentroid"], sources[indx]["ycentroid"]
                 locn = None
                 log.info("Auto source detection success.")
                 log.info("Using x_center = %g, y_center = %g", x_center, y_center)
@@ -774,7 +780,7 @@ def extract_ifu(input_model, source_type, extract_params):
 
     # get aperture for extended it will not change with wavelength
     if source_type == "EXTENDED":
-        aperture = RectangularAperture(position, width, height, theta)
+        aperture = RectangularAperture(position, width, height, theta=theta)
 
     for k in range(shape[0]):  # looping over wavelength
         inner_bkg = None
@@ -1087,10 +1093,10 @@ def get_coordinates(input_model, x0, y0):
     wavelength : ndarray, 1D
         The wavelength in micrometers at each pixel.
     """
-    if hasattr(input_model.meta, "wcs"):
+    if getattr(input_model.meta, "wcs", None) is not None:
         wcs = input_model.meta.wcs
     else:
-        log.warning("WCS function not found in input.")
+        log.warning("WCS not found in input.")
         wcs = None
 
     nelem = input_model.data.shape[0]

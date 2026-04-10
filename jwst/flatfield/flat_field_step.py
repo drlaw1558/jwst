@@ -1,3 +1,5 @@
+"""Correct rate data for flat field effects."""
+
 import logging
 
 from stdatamodels.jwst import datamodels
@@ -69,27 +71,27 @@ class FlatFieldStep(Step):
 
             correction_pars : dict
                 After the step has successfully run, the flat field applied is
-                stored, as {'flat': DataModel}.
+                stored, as ``{'flat': DataModel}``.
             use_correction_pars : bool
                 Use the flat stored in ``correction_pars``.
 
         Parameters
         ----------
-        input_data : str or DataModel
+        input_data : str or `~stdatamodels.jwst.datamodels.JwstDataModel`
             Input data to correct.  Datamodel type varies, depending on
             the exposure type.
 
         Returns
         -------
-        DataModel
+        `~stdatamodels.jwst.datamodels.JwstDataModel`
             Output data of the same type as input, with flat corrections applied.
         """
-        input_model = datamodels.open(input_data)
-        exposure_type = input_model.meta.exposure.type.upper()
+        output_model = self.prepare_output(input_data)
+        exposure_type = output_model.meta.exposure.type.upper()
 
-        log.debug(f"Input is {str(input_model)} of exposure type {exposure_type}")
+        log.debug(f"Input is {str(output_model)} of exposure type {exposure_type}")
 
-        if input_model.meta.instrument.name.upper() == "NIRSPEC":
+        if output_model.meta.instrument.name.upper() == "NIRSPEC":
             if exposure_type not in NRS_SPEC_MODES and exposure_type not in NRS_IMAGING_MODES:
                 log.warning(
                     "Exposure type is %s; flat-fielding will be "
@@ -97,11 +99,12 @@ class FlatFieldStep(Step):
                     "supported for this mode.",
                     exposure_type,
                 )
-                return self.skip_step(input_model)
+                output_model.meta.cal_step.flat_field = "SKIPPED"
+                return output_model
 
         # Check whether extract_2d has been run.
         if (
-            input_model.meta.cal_step.extract_2d == "COMPLETE"
+            output_model.meta.cal_step.extract_2d == "COMPLETE"
             and exposure_type not in EXTRACT_2D_IS_OK
         ):
             log.warning(
@@ -109,7 +112,8 @@ class FlatFieldStep(Step):
                 "flat-fielding will be skipped.",
                 exposure_type,
             )
-            return self.skip_step(input_model)
+            output_model.meta.cal_step.flat_field = "SKIPPED"
+            return output_model
 
         # Retrieve reference files only if no user-supplied flat is specified
         if self.user_supplied_flat is not None:
@@ -136,15 +140,14 @@ class FlatFieldStep(Step):
                 ("flat", reference_file_models["user_supplied_flat"].meta.filename)
             )
         else:
-            reference_file_models = self._get_references(input_model, exposure_type)
+            reference_file_models = self._get_references(output_model, exposure_type)
 
         # Do the flat-field correction
         output_model, flat_applied = flat_field.do_correction(
-            input_model, **reference_file_models, inverse=self.inverse
+            output_model, **reference_file_models, inverse=self.inverse
         )
 
-        # Close the input and reference files
-        input_model.close()
+        # Close the reference files
         try:
             for model in reference_file_models.values():
                 model.close()
@@ -161,37 +164,13 @@ class FlatFieldStep(Step):
 
         return output_model
 
-    def skip_step(self, input_model):
-        """
-        Set the calibration step status to SKIPPED.
-
-        This method makes a copy of the input model, sets the calibration
-        switch for the flat_field step to SKIPPED in the copy, closes
-        input_model, and returns the copy.
-
-        Parameters
-        ----------
-        input_model : DataModel
-            Input data model.
-
-        Returns
-        -------
-        DataModel
-            A copy of the input model with the step status set to
-            "SKIPPED".
-        """
-        result = input_model.copy()
-        result.meta.cal_step.flat_field = "SKIPPED"
-        input_model.close()
-        return result
-
     def _get_references(self, data, exposure_type):
         """
         Retrieve required CRDS reference files.
 
         Parameters
         ----------
-        data : DataModel
+        data : `~stdatamodels.jwst.datamodels.JwstDataModel`
             The data to base the CRDS lookups on.
         exposure_type : str
             The exposure type keyword value.

@@ -208,6 +208,10 @@ _calculated_suffixes = {
     "emicorr",
     "emicorrstep",
     "badpixselfcalstep",
+    "targcentroidstep",
+    "targ_centroid",
+    "adaptive_trace_model",
+    "adaptivetracemodelstep",
 }
 
 

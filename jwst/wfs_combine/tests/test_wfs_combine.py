@@ -30,11 +30,13 @@ def add_point_source(inarray, scale, xcen, ycen, sigx, sigy):
     return outarray
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture()
 def wfs_association(tmp_path_factory):
     imsize = 10
     tmp_path = tmp_path_factory.mktemp("wfs")
     im1 = datamodels.ImageModel((imsize, imsize))
+    im1.dq = im1.get_default("dq")
+    im1.err = im1.get_default("err")
     im1.meta.wcsinfo = {
         "dec_ref": 11.99875540218638,
         "ra_ref": 22.02351763251896,
@@ -71,7 +73,7 @@ def wfs_association(tmp_path_factory):
         product_name="jw00024-a3001_t001_nircam_nrca4_{suffix}",
     )
     asn.data["program"] = "00024"
-    asn.data["asn_type"] = "wfs-image2"
+    asn.data["asn_type"] = "image2"
     asn.sequence = 1
     asn_name, serialized = asn.dump(format="json")
     path_asn = tmp_path / asn_name
@@ -122,24 +124,24 @@ def test_shift_order_no_refine_no_flip(wfs_association):
     path_asn, path1, path2 = wfs_association
     nircam_pixel_size = 0.031 / 3600.0
     delta_pixel = 5
-    with datamodels.open(path2) as im2:
-        im2.meta.wcsinfo = {
-            "dec_ref": 11.99875540218638,
-            "ra_ref": 22.02351763251896 + delta_pixel * nircam_pixel_size,
-            "roll_ref": 0.005076934167039675,
-            "v2_ref": 86.039011,
-            "v3_ref": -493.385704,
-            "v3yangle": -0.07385127,
-            "vparity": -1,
-            "wcsaxes": 2,
-        }
-        im2 = AssignWcsStep.call(im2, sip_approx=False)
 
-        im2.save(path2)
+    im1 = datamodels.open(path1)
+    im2 = datamodels.open(path2)
+    im2.meta.wcsinfo = {
+        "dec_ref": 11.99875540218638,
+        "ra_ref": 22.02351763251896 + delta_pixel * nircam_pixel_size,
+        "roll_ref": 0.005076934167039675,
+        "v2_ref": 86.039011,
+        "v3_ref": -493.385704,
+        "v3yangle": -0.07385127,
+        "vparity": -1,
+        "wcsaxes": 2,
+    }
+    im2 = AssignWcsStep.call(im2, sip_approx=False)
+
     wfs = wfs_combine.DataSet(
-        path1,
-        path2,
-        "outfile.fits",
+        im1,
+        im2,
         do_refine=False,
         flip_dithers=False,
         psf_size=50,
@@ -151,8 +153,9 @@ def test_shift_order_no_refine_no_flip(wfs_association):
     assert wfs.input_2.meta.observation.exposure_number == "2"
     assert wfs.off_x == abs(delta_pixel)
     assert wfs.off_y == 0
-    wfs.input_1.close()
-    wfs.input_2.close()
+    del wfs
+    im1.close()
+    im2.close()
 
 
 def test_shift_order_no_refine_with_flip(wfs_association):
@@ -161,23 +164,23 @@ def test_shift_order_no_refine_with_flip(wfs_association):
     path_asn, path1, path2 = wfs_association
     nircam_pixel_size = 0.031 / 3600.0
     delta_pixel = -5
-    with datamodels.open(path2) as im2:
-        im2.meta.wcsinfo = {
-            "dec_ref": 11.99875540218638,
-            "ra_ref": 22.02351763251896 + delta_pixel * nircam_pixel_size,
-            "roll_ref": 0.005076934167039675,
-            "v2_ref": 86.039011,
-            "v3_ref": -493.385704,
-            "v3yangle": -0.07385127,
-            "vparity": -1,
-            "wcsaxes": 2,
-        }
-        im2 = AssignWcsStep.call(im2, sip_approx=False)
-        im2.save(path2)
+    im1 = datamodels.open(path1)
+    im2 = datamodels.open(path2)
+    im2.meta.wcsinfo = {
+        "dec_ref": 11.99875540218638,
+        "ra_ref": 22.02351763251896 + delta_pixel * nircam_pixel_size,
+        "roll_ref": 0.005076934167039675,
+        "v2_ref": 86.039011,
+        "v3_ref": -493.385704,
+        "v3yangle": -0.07385127,
+        "vparity": -1,
+        "wcsaxes": 2,
+    }
+    im2 = AssignWcsStep.call(im2, sip_approx=False)
+
     wfs = wfs_combine.DataSet(
-        path1,
-        path2,
-        "outfile.fits",
+        im1,
+        im2,
         do_refine=False,
         flip_dithers=True,
         psf_size=50,
@@ -185,11 +188,13 @@ def test_shift_order_no_refine_with_flip(wfs_association):
         n_size=2,
     )
     wfs.do_all()
-    wfs.input_1.close()
-    wfs.input_2.close()
-    #    assert wfs.input_1.meta.observation.exposure_number == '2'
-    #    assert wfs.input_2.meta.observation.exposure_number == '1'
+    assert wfs.input_1.meta.observation.exposure_number == "2"
+    assert wfs.input_2.meta.observation.exposure_number == "1"
     assert wfs.off_x == -1 * delta_pixel
+
+    del wfs
+    im1.close()
+    im2.close()
 
 
 @pytest.mark.parametrize(
@@ -228,34 +233,37 @@ def test_refine_no_error(wfs_association, xshift, yshift, xerror, yerror, flip_d
     delta_x_pixel = xshift
     # positive y pixel changes are negative declination changes
     delta_y_pixel = -1.0 * yshift
-    with datamodels.open(path1) as im1:
-        im1.data = np.zeros(shape=(data_size, data_size), dtype=np.float32)
-        im1.dq = np.zeros(shape=(data_size, data_size), dtype=np.int32)
-        im1.data = add_point_source(im1.data, 200, 100, 100, 4, 4)
-        im1.save(path1)
-    with datamodels.open(path2) as im2:
-        im2.data = np.zeros(shape=(data_size, data_size), dtype=np.float32)
-        im2.dq = np.zeros(shape=(data_size, data_size), dtype=np.int32)
-        im2.meta.wcsinfo = {
-            "dec_ref": 11.99875540218638 + delta_y_pixel * nircam_pixel_size,
-            "ra_ref": 22.02351763251896 + delta_x_pixel * nircam_pixel_size,
-            "roll_ref": 0.005076934167039675,
-            "v2_ref": 86.039011,
-            "v3_ref": -493.385704,
-            "v3yangle": -0.07385127,
-            "vparity": -1,
-            "wcsaxes": 2,
-        }
-        im2 = AssignWcsStep.call(im2, sip_approx=False)
-        # shift the actual location of the 2nd image including the error in the WCS position
-        im2.data = add_point_source(
-            im2.data, 200, 100 + delta_x_pixel + xerror, 100 + delta_y_pixel - yerror, 4, 4
-        )
-        im2.save(path2)
+
+    im1 = datamodels.open(path1)
+    im1.data = np.zeros(shape=(data_size, data_size), dtype=np.float32)
+    im1.dq = np.zeros(shape=(data_size, data_size), dtype=np.int32)
+    im1.err = np.zeros(shape=(data_size, data_size), dtype=np.float32)
+    im1.data = add_point_source(im1.data, 200, 100, 100, 4, 4)
+
+    im2 = datamodels.open(path2)
+    im2.data = np.zeros(shape=(data_size, data_size), dtype=np.float32)
+    im2.dq = np.zeros(shape=(data_size, data_size), dtype=np.int32)
+    im2.err = np.zeros(shape=(data_size, data_size), dtype=np.float32)
+    im2.meta.wcsinfo = {
+        "dec_ref": 11.99875540218638 + delta_y_pixel * nircam_pixel_size,
+        "ra_ref": 22.02351763251896 + delta_x_pixel * nircam_pixel_size,
+        "roll_ref": 0.005076934167039675,
+        "v2_ref": 86.039011,
+        "v3_ref": -493.385704,
+        "v3yangle": -0.07385127,
+        "vparity": -1,
+        "wcsaxes": 2,
+    }
+    im2 = AssignWcsStep.call(im2, sip_approx=False)
+
+    # shift the actual location of the 2nd image including the error in the WCS position
+    im2.data = add_point_source(
+        im2.data, 200, 100 + delta_x_pixel + xerror, 100 + delta_y_pixel - yerror, 4, 4
+    )
+
     wfs = wfs_combine.DataSet(
-        path1,
-        path2,
-        "outfile.fits",
+        im1,
+        im2,
         do_refine=True,
         flip_dithers=flip_dithers,
         psf_size=50,
@@ -272,8 +280,10 @@ def test_refine_no_error(wfs_association, xshift, yshift, xerror, yerror, flip_d
         assert wfs.off_x == abs(delta_x_pixel + xerror)
         # Positive y pixel errors are negative in declination
         assert wfs.off_y == -1.0 * (delta_y_pixel - yerror)
-    wfs.input_1.close()
-    wfs.input_2.close()
+
+    del wfs
+    im1.close()
+    im2.close()
 
 
 def test_refine_with_error(wfs_association):
@@ -282,29 +292,33 @@ def test_refine_with_error(wfs_association):
     nircam_pixel_size = 0.031 / 3600.0
     shift_error = 2
     delta_pixel = 5
-    with datamodels.open(path1) as im1:
-        im1.data = np.zeros(shape=(data_size, data_size), dtype=np.float32)
-        im1.data = add_point_source(im1.data, 200, 100, 100, 4, 4)
-        im1.save(path1)
-    with datamodels.open(path2) as im2:
-        im2.meta.wcsinfo = {
-            "dec_ref": 11.99875540218638,
-            "ra_ref": 22.02351763251896 + delta_pixel * nircam_pixel_size,
-            "roll_ref": 0.005076934167039675,
-            "v2_ref": 86.039011,
-            "v3_ref": -493.385704,
-            "v3yangle": -0.07385127,
-            "vparity": -1,
-            "wcsaxes": 2,
-        }
-        im2 = AssignWcsStep.call(im2, sip_approx=False)
-        im2.data = np.zeros(shape=(data_size, data_size), dtype=np.float32)
-        im2.data = add_point_source(im2.data, 200, 100 + delta_pixel + shift_error, 100, 4, 4)
-        im2.save(path2)
+
+    im1 = datamodels.open(path1)
+    im1.data = np.zeros(shape=(data_size, data_size), dtype=np.float32)
+    im1.data = add_point_source(im1.data, 200, 100, 100, 4, 4)
+    im1.dq = np.zeros(shape=(data_size, data_size), dtype=np.int32)
+    im1.err = np.zeros(shape=(data_size, data_size), dtype=np.float32)
+
+    im2 = datamodels.open(path2)
+    im2.meta.wcsinfo = {
+        "dec_ref": 11.99875540218638,
+        "ra_ref": 22.02351763251896 + delta_pixel * nircam_pixel_size,
+        "roll_ref": 0.005076934167039675,
+        "v2_ref": 86.039011,
+        "v3_ref": -493.385704,
+        "v3yangle": -0.07385127,
+        "vparity": -1,
+        "wcsaxes": 2,
+    }
+    im2 = AssignWcsStep.call(im2, sip_approx=False)
+    im2.data = np.zeros(shape=(data_size, data_size), dtype=np.float32)
+    im2.data = add_point_source(im2.data, 200, 100 + delta_pixel + shift_error, 100, 4, 4)
+    im2.dq = np.zeros(shape=(data_size, data_size), dtype=np.int32)
+    im2.err = np.zeros(shape=(data_size, data_size), dtype=np.float32)
+
     wfs = wfs_combine.DataSet(
-        path1,
-        path2,
-        "outfile.fits",
+        im1,
+        im2,
         do_refine=True,
         flip_dithers=True,
         psf_size=50,
@@ -316,5 +330,7 @@ def test_refine_with_error(wfs_association):
     assert wfs.input_2.meta.observation.exposure_number == "2"
     assert wfs.off_x == delta_pixel + shift_error
     assert wfs.off_y == 0
-    wfs.input_1.close()
-    wfs.input_2.close()
+
+    del wfs
+    im1.close()
+    im2.close()

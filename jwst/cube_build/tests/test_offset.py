@@ -96,20 +96,20 @@ def miri_ifushort_short_2files():
 
     input_model1 = datamodels.IFUImageModel()
     input_model1.meta.exposure.type = "MIR_MRS"
-    input_model1.meta.wcsinfo._instance.update(wcsinfo)
-    input_model1.meta.instrument._instance.update(mirifushort_short)
-    input_model1.meta.observation._instance.update(observation)
-    input_model1.meta.subarray._instance.update(subarray)
+    input_model1.meta.wcsinfo.instance.update(wcsinfo)
+    input_model1.meta.instrument.instance.update(mirifushort_short)
+    input_model1.meta.observation.instance.update(observation)
+    input_model1.meta.subarray.instance.update(subarray)
     input_model1.meta.cal_step.assign_wcs = "COMPLETE"
     input_model1.meta.filename = "test1.fits"
     input_model1.data = np.random.random((1024, 1032))
 
     input_model2 = datamodels.IFUImageModel()
     input_model2.meta.exposure.type = "MIR_MRS"
-    input_model2.meta.wcsinfo._instance.update(wcsinfo)
-    input_model2.meta.instrument._instance.update(mirifushort_short)
-    input_model2.meta.observation._instance.update(observation)
-    input_model2.meta.subarray._instance.update(subarray)
+    input_model2.meta.wcsinfo.instance.update(wcsinfo)
+    input_model2.meta.instrument.instance.update(mirifushort_short)
+    input_model2.meta.observation.instance.update(observation)
+    input_model2.meta.subarray.instance.update(subarray)
     input_model2.meta.cal_step.assign_wcs = "COMPLETE"
     input_model2.meta.filename = "test2.fits"
     input_model2.data = np.random.random((1024, 1032))
@@ -138,10 +138,10 @@ def test_offset_file_config(tmp_cwd, miri_ifushort_short_2files, offset_file):
 
     # first test that it is a valid asdf file and has what is needed
     step = CubeBuildStep()
-    step.input_models = miri_ifushort_short_2files
+    input_models = miri_ifushort_short_2files
 
     step.offset_file = offset_file
-    offsets = step.check_offset_file()
+    offsets = step.check_offset_file(input_models)
     assert isinstance(offsets, dict)
 
 
@@ -151,13 +151,13 @@ def test2_offset_file_config(tmp_cwd, miri_ifushort_short_2files, offset_file):
     # Test changing one of the filenames so it is not in the list given
     # in the offset_file
     step = CubeBuildStep()
-    step.input_models = miri_ifushort_short_2files
+    input_models = miri_ifushort_short_2files
 
     miri_ifushort_short_2files[0].meta.filename = "test3.fits"
     step.offset_file = offset_file
 
     with pytest.raises(ValueError):
-        step.check_offset_file()
+        step.check_offset_file(input_models)
 
 
 def test_offset_file_units(tmp_cwd, miri_ifushort_short_2files, offset_file_arcmin):
@@ -165,20 +165,20 @@ def test_offset_file_units(tmp_cwd, miri_ifushort_short_2files, offset_file_arcm
 
     # test is the if the user set the units to arcmins
     step = CubeBuildStep()
-    step.input_models = miri_ifushort_short_2files
+    input_models = miri_ifushort_short_2files
 
     step.offset_file = offset_file_arcmin
     with pytest.raises(Exception):
-        step.check_offset_file()
+        step.check_offset_file(input_models)
 
 
 def test_read_offset_file(miri_ifushort_short_2files, offset_file):
     """Test offset file has been read in correctly"""
 
     step = CubeBuildStep()
-    step.input_models = miri_ifushort_short_2files
+    input_models = miri_ifushort_short_2files
     step.offset_file = offset_file
-    offsets = step.check_offset_file()
+    offsets = step.check_offset_file(input_models)
     # Test that the offset file is read in and is a dictionary
     assert isinstance(offsets, dict)
 
@@ -212,7 +212,7 @@ def test_read_offset_file(miri_ifushort_short_2files, offset_file):
     cubeinfo.instrument = this_instrument
     cubeinfo.determine_band_coverage(master_table)
     num_cubes, cube_pars = cubeinfo.number_cubes()
-    # test with output_type = mulit we get 1 cube
+    # test with output_type = multi we get 1 cube
     # test that cube info sets up the correct channels and band for data
     assert num_cubes == 1
     assert cube_pars["1"]["par1"] == ["1", "2"]
@@ -247,7 +247,7 @@ def test_read_offset_file(miri_ifushort_short_2files, offset_file):
     list_par1 = ["1", "2"]
     list_par2 = ["short", "short"]
     output_name_base = "TEMP"
-
+    linear_wave = True
     instrument_info = instrument_defaults.InstrumentInfo()
 
     thiscube = ifu_cube.IFUCubeData(
@@ -255,6 +255,7 @@ def test_read_offset_file(miri_ifushort_short_2files, offset_file):
         miri_ifushort_short_2files,
         output_name_base,
         output_type,
+        linear_wave,
         this_instrument,
         list_par1,
         list_par2,

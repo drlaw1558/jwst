@@ -8,7 +8,11 @@ from astropy.table import QTable
 from numpy.testing import assert_allclose
 
 from jwst.source_catalog import SourceCatalogStep
-from jwst.source_catalog.tests.helpers import make_nircam_model, make_nircam_model_without_apcorr
+from jwst.source_catalog.tests.helpers import (
+    make_nircam_model,
+    make_nircam_model_without_apcorr,
+    mock_apcorr,
+)
 
 
 @pytest.fixture
@@ -29,8 +33,14 @@ def nircam_model_without_apcorr():
     ),
 )
 def test_source_catalog(nircam_model, npixels, nsources):
+    apcorr = mock_apcorr()
     step = SourceCatalogStep(
-        snr_threshold=0.5, npixels=npixels, bkg_boxsize=50, kernel_fwhm=2.0, save_results=False
+        snr_threshold=0.5,
+        npixels=npixels,
+        bkg_boxsize=50,
+        kernel_fwhm=2.0,
+        save_results=False,
+        override_apcorr=apcorr,
     )
     cat = step.run(nircam_model)
     assert len(cat) == nsources
@@ -39,22 +49,25 @@ def test_source_catalog(nircam_model, npixels, nsources):
 
     if npixels == 5 and nsources == 2:
         # test values of some specific computed quantities
-        assert np.isclose(cat["xcentroid"][1], 19.453064764431833)
-        assert np.isclose(cat["ycentroid"][1], 41.963065678485115)
-        assert np.isclose(cat["aper_bkg_flux"][1].value, 1.40e-7)
-        assert np.isclose(cat["aper_bkg_flux_err"][1].value, 8.52237054e-09)
-        assert np.isclose(cat["CI_50_30"][1], 2.352272196434725)
-        assert np.isclose(cat["sharpness"][1], 0.9102634628764403)
-        assert np.isclose(cat["roundness"][1], 1.5954264)
-        assert np.isclose(cat["nn_dist"][1].value, 53.07168773319497)
-        assert np.isclose(cat["isophotal_flux"][1].value, 7.940753383195442e-05)
+        assert np.isclose(cat["xcentroid"][1], 19.453, atol=0.001)
+        assert np.isclose(cat["ycentroid"][1], 41.963, atol=0.001)
+        assert np.isclose(cat["aper_bkg_flux"][1].value, 5.62e-8, rtol=0.1)
+        assert np.isclose(cat["aper_bkg_flux_err"][1].value, 8.52e-09, rtol=0.1)
+        assert np.isclose(cat["CI_50_30"][1], 1.965, atol=0.001)
+        assert np.isclose(cat["sharpness"][1], 0.910, atol=0.001)
+        assert np.isclose(cat["roundness"][1], 1.595, atol=0.001)
+        assert np.isclose(cat["nn_dist"][1].value, 53.072, atol=0.001)
+        assert np.isclose(cat["isophotal_flux"][1].value, 7.94e-05, rtol=0.1)
         assert cat["isophotal_flux_err"][1].unit == "Jy"
-        assert np.isclose(cat["isophotal_flux_err"][1].value, 3.6102634e-07)
-        assert np.isclose(cat["isophotal_abmag"][1], 19.150345729246215)
-        assert np.isclose(cat["semimajor_sigma"][1].value, 18.84372169911978)
-        assert np.isclose(cat["semiminor_sigma"][1].value, 7.024931388267103)
-        assert np.isclose(cat["ellipticity"][1].value, 0.62720043)
-        assert np.isclose(cat["orientation"][1].value, -72.78329207140818)
+        assert np.isclose(cat["isophotal_flux_err"][1].value, 3.61e-07, rtol=0.1)
+        assert np.isclose(cat["isophotal_abmag"][1], 19.150, atol=0.001)
+        assert np.isclose(cat["semimajor_sigma"][1].value, 18.844, atol=0.001)
+        assert np.isclose(cat["semiminor_sigma"][1].value, 7.025, atol=0.001)
+        assert np.isclose(cat["ellipticity"][1].value, 0.627, atol=0.001)
+        assert np.isclose(cat["orientation"][1].value, -72.783, atol=0.001) or np.isclose(
+            cat["orientation"][1].value, 287.217, atol=0.001
+        )
+        assert np.isclose(cat["sky_orientation"][1].value, 77.217, atol=0.001)
 
 
 def test_source_catalog_no_sources(nircam_model, monkeypatch):
@@ -157,7 +170,7 @@ def test_source_catalog_point_sources(finder, nircam_model, tmp_cwd):
 
 
 def test_output_is_not_input(nircam_model):
-    """Make sure output is not the same as input."""
+    """Make sure input is not modified."""
     step = SourceCatalogStep(
         snr_threshold=0.5, npixels=5, bkg_boxsize=50, kernel_fwhm=2.0, save_results=False
     )
@@ -167,3 +180,7 @@ def test_output_is_not_input(nircam_model):
     assert result is not nircam_model
     assert isinstance(result, QTable)
     assert isinstance(nircam_model, dm.ImageModel)
+
+    # Input is not modified when called standalone
+    assert nircam_model.meta.source_catalog is None
+    assert nircam_model.meta.cal_step.source_catalog is None

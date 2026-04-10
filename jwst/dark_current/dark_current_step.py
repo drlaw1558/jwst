@@ -1,3 +1,5 @@
+"""Perform dark current correction."""
+
 import logging
 
 import numpy as np
@@ -6,7 +8,7 @@ from stdatamodels.jwst import datamodels
 
 from jwst.stpipe import Step
 
-__all__ = ["DarkCurrentStep"]
+__all__ = ["DarkCurrentStep", "save_dark_data_as_dark_model", "dark_output_data_2_ramp_model"]
 
 log = logging.getLogger(__name__)
 
@@ -93,8 +95,8 @@ class DarkCurrentStep(Step):
 
         1. Any value provided to the step parameter, either from
            the user or a parameter reference file
-        2. The 2-D array stored in dark_model.average_dark_current
-        3. The scalar value stored in dark_model.meta.exposure.average_dark_current
+        2. The 2-D array stored in ``dark_model.average_dark_current``
+        3. The scalar value stored in ``dark_model.meta.exposure.average_dark_current``
 
         Parameters
         ----------
@@ -105,16 +107,24 @@ class DarkCurrentStep(Step):
             The dark reference file datamodel.
         """
         if self.average_dark_current is not None:
-            input_model.average_dark_current[:, :] = self.average_dark_current
+            input_model.average_dark_current = (
+                input_model.get_default("average_dark_current") + self.average_dark_current
+            )
             log.info(
                 "Using Poisson noise from average dark current %s e-/sec", self.average_dark_current
             )
         else:
             # First prioritize a 2D average_dark_current, if defined in dark.
             # If not present, apply scalar to datamodel array, if scalar is present.
-            if np.sum(dark_model.average_dark_current) == 0.0:
-                input_model.average_dark_current[:, :] = (
-                    dark_model.meta.exposure.average_dark_current
+            if (
+                dark_model.average_dark_current is None
+                or np.sum(dark_model.average_dark_current) == 0.0
+            ):
+                scalar_dark_current = dark_model.meta.exposure.average_dark_current
+                if scalar_dark_current is None:
+                    scalar_dark_current = 0.0
+                input_model.average_dark_current = (
+                    input_model.get_default("average_dark_current") + scalar_dark_current
                 )
             elif np.shape(input_model.average_dark_current) != np.shape(
                 dark_model.average_dark_current
@@ -134,7 +144,7 @@ def save_dark_data_as_dark_model(dark_data, dark_model, instrument):
     dark_data : ndarray
         Dark data used in the dark current step.
 
-    dark_model : `~stdatamodels.jwst.datamodels.DarkMIRIModel` or
+    dark_model : `~stdatamodels.jwst.datamodels.DarkMIRIModel` or \
                  `~stdatamodels.jwst.datamodels.DarkModel`
         The input dark model from reference.
 
@@ -160,7 +170,7 @@ def dark_output_data_2_ramp_model(out_data, out_model):
 
     Parameters
     ----------
-    out_data : `~stdatamodels.DataModel`
+    out_data : `~stdatamodels.jwst.datamodels.JwstDataModel`
         Computed science data from the dark current step.
 
     out_model : `~stdatamodels.jwst.datamodels.RampModel`
@@ -175,10 +185,9 @@ def dark_output_data_2_ramp_model(out_data, out_model):
         # If processing was skipped in the lower-level routines,
         # just return the unmodified input model
         out_model.meta.cal_step.dark_sub = "SKIPPED"
-        return out_model
     else:
         out_model.meta.cal_step.dark_sub = out_data.cal_step
         out_model.data = out_data.data
         out_model.groupdq = out_data.groupdq
         out_model.pixeldq = out_data.pixeldq
-        return out_model
+    return out_model

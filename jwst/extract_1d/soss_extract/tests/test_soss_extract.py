@@ -3,7 +3,6 @@ import pytest
 from stdatamodels.jwst.datamodels import SossWaveGridModel, SpecModel
 
 from jwst.extract_1d.soss_extract.soss_extract import (
-    SHORT_CUTOFF,
     DetectorModelOrder,
     Integration,
     _build_null_spec_table,
@@ -11,6 +10,8 @@ from jwst.extract_1d.soss_extract.soss_extract import (
     _process_one_integration,
 )
 from jwst.extract_1d.soss_extract.tests.helpers import DATA_SHAPE
+
+SHORT_CUTOFF = [None, 0.58, 0.63]
 
 
 @pytest.mark.parametrize("order", [1, 2, 3])
@@ -37,7 +38,6 @@ def monkeypatch_setup(
     monkeypatch.setattr(
         "jwst.extract_1d.soss_extract.soss_extract.make_background_mask", mock_make_background_mask
     )
-    monkeypatch.setattr("jwst.extract_1d.soss_extract.soss_extract.CUTOFFS", [200, 200, 200])
 
 
 @pytest.fixture
@@ -61,6 +61,7 @@ def detector_models(
             kernel_func=webb_kernels[order - 1],
             kernel_native=webb_kernels[order - 1],
             subarray="SUBSTRIP256",
+            trace_cutoff=200,
         )
         detector_models.append(detector_model)
     return detector_models
@@ -80,6 +81,9 @@ def test_model_image(monkeypatch_setup, imagemodel, detector_mask, detector_mode
         extract_order3 = True
     else:
         extract_order3 = False
+
+    for model in detector_models:
+        model.mederr = scierr
 
     integration = Integration(
         scidata,
@@ -183,6 +187,9 @@ def test_model_image_tikfac_specified(
         detector_models, DATA_SHAPE, box_width, orders_requested=order_list
     )
 
+    for model in detector_models:
+        model.mederr = scierr
+
     integration = Integration(
         scidata,
         scierr,
@@ -226,6 +233,9 @@ def test_model_image_wavegrid_specified(
     Note the failure with SossWaveGridModel passed as input. What should be done about that?
     """
     scidata, scierr = imagemodel
+
+    for model in detector_models:
+        model.mederr = scierr
 
     order_list = [1, 2]
     refmask = np.zeros_like(detector_mask)
@@ -287,6 +297,10 @@ def test_process_one_integration(
     scidata, scierr = imagemodel
     refmask = np.zeros_like(detector_mask)
     box_width = 5.0
+
+    for model in detector_models:
+        model.mederr = scierr
+
     box_weights, wavelengths = _compute_box_weights(
         detector_models, DATA_SHAPE, box_width, orders_requested=[1, 2, 3]
     )

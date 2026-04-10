@@ -14,6 +14,7 @@ from jwst.datamodels.utils.flat_multispec import (
     populate_recarray,
     set_schema_units,
 )
+from jwst.datamodels.utils.tests.wfss_helpers import mock_wcs
 from jwst.tests.helpers import LogWatcher
 
 
@@ -50,7 +51,7 @@ def empty_recarray(request):
 def input_spec():
     """Make an input SpecModel with some metadata and column units."""
     spec = dm.SpecModel()
-    spec.spec_table = np.zeros((10,), dtype=spec.spec_table.dtype)
+    spec.spec_table = np.zeros((10,), dtype=spec.get_dtype("spec_table"))
     spec.name = "test_slit"
     spec.source_id = 1
 
@@ -64,7 +65,7 @@ def input_spec():
 def output_spec():
     """Make an output MRSSpecModel with only a bare spec_table."""
     spec = dm.MRSSpecModel()
-    spec.spec_table = np.zeros((5,), dtype=spec.spec_table.dtype)
+    spec.spec_table = np.zeros((5,), dtype=spec.get_dtype("spec_table"))
     return spec
 
 
@@ -95,7 +96,8 @@ def tso_multi_spec():
         # Add some metadata
         spec.source_id = i + 1
         spec.name = f"test {i + 1}"
-        spec.meta.wcs = ["test"]
+        spec.meta.wcs = mock_wcs()
+        spec.meta.wcs.pipeline[0].transform.name = "test"
         spec.spec_table["INT_NUM"] = i + 1
 
         tso_multi.spec.append(spec)
@@ -269,9 +271,9 @@ def test_set_schema_units():
 
 
 def test_copy_spec_metadata(input_spec, output_spec):
-    # Before copying, source_id and name are blank or default
+    # Before copying, source_id and name are blank
     assert output_spec.name is None
-    assert output_spec.source_id == 0
+    assert output_spec.source_id is None
 
     copy_spec_metadata(input_spec, output_spec)
 
@@ -300,9 +302,9 @@ def test_expand_flat_spec(tso_multi_spec):
         assert spec.name == f"test {input_spec_num}"
         assert spec.int_num == input_spec_num
 
-        assert spec.meta.wcs[0] == "test"
-        spec.meta.wcs[0] = "copy"
-        assert spec.meta.wcs[0] == "copy"
-        assert tso_multi_spec.spec[input_spec_num - 1].meta.wcs[0] == "test"
+        assert spec.meta.wcs.pipeline[0].transform.name == "test"
+        spec.meta.wcs.pipeline[0].transform.name = "copy"
+        assert spec.meta.wcs.pipeline[0].transform.name == "copy"
+        assert tso_multi_spec.spec[input_spec_num - 1].meta.wcs.pipeline[0].transform.name == "test"
 
         assert spec.spec_table.columns.units == ["s"] * len(spec.spec_table.columns)

@@ -52,7 +52,6 @@ ignore = [
     "E741", # ambiguous variable name (O/0, l/I, etc.)
     "UP008", # use super() instead of super(class, self). no harm being explicit
     "UP015", # unnecessary open(file, "r"). no harm being explicit
-    "UP038", # use | instead of tuple in isinstance check
     "TRY003", # prevents custom exception messages not defined in exception itself.
     "TRY400", # enforces log.exception instead of log.error in except clause.
     "ISC001", # single line implicit string concatenation. formatter recommends ignoring this.
@@ -129,6 +128,7 @@ ban-relative-imports = "all"  # Disallow all relative imports.
 "jwst/regtest/regtestdata.py" = [
     "SLF", "ARG", "PTH",
     "A002", # builtin variable shadowing
+    "A003", # builtin variable shadowing
     "S101", # use of assert
 ]
 "jwst/regtest/conftest.py" = [
