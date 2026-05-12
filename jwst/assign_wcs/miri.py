@@ -49,7 +49,7 @@ __all__ = [
 ]
 
 
-def create_pipeline(input_model, reference_files):
+def create_pipeline(input_model, reference_files, mirifu_thresh):
     """
     Create the WCS pipeline for MIRI modes.
 
@@ -68,7 +68,7 @@ def create_pipeline(input_model, reference_files):
         The WCS pipeline, suitable for input into `gwcs.wcs.WCS`.
     """
     exp_type = input_model.meta.exposure.type.lower()
-    pipeline = exp_type2transform[exp_type](input_model, reference_files)
+    pipeline = exp_type2transform[exp_type](input_model, reference_files, mirifu_thresh)
     if pipeline:
         log.info(f"Created a MIRI {exp_type} pipeline with references {reference_files}")
     return pipeline
@@ -565,7 +565,7 @@ def lrs_abltov2v3l(input_model, reference_files):
     return abl_to_v2v3l
 
 
-def ifu(input_model, reference_files):
+def ifu(input_model, reference_files, mirifu_thresh):
     """
     Create the WCS pipeline for MIRI IFU data.
 
@@ -622,7 +622,7 @@ def ifu(input_model, reference_files):
     world = cf.CompositeFrame([icrs, spec], name="world")
 
     # Define the actual transforms
-    det2abl = (detector_to_abl(input_model, reference_files)).rename("detector_to_abl")
+    det2abl = (detector_to_abl(input_model, reference_files, mirifu_thresh)).rename("detector_to_abl")
     abl2v2v3l = (abl_to_v2v3l(input_model, reference_files)).rename("abl_to_v2v3l")
 
     # Compute differential velocity aberration (DVA) correction:
@@ -648,7 +648,7 @@ def ifu(input_model, reference_files):
     return pipeline
 
 
-def detector_to_abl(input_model, reference_files):
+def detector_to_abl(input_model, reference_files, mirifu_thresh):
     """
     Create the transform from "detector" to "alpha_beta" frame.
 
@@ -709,8 +709,9 @@ def detector_to_abl(input_model, reference_files):
 
     with RegionsModel(reference_files["regions"]) as f:
         allregions = f.regions.copy()
-        # Use the 80% throughput slice mask
-        regions = allregions[7, :, :]
+        # Use the 80% throughput slice mask unless otherwise specified
+        log.info("Using throughput level {}".format(mirifu_thresh))
+        regions = allregions[mirifu_thresh, :, :]
 
     label_mapper = selector.LabelMapperArray(regions)
     transforms = {}

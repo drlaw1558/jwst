@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 __all__ = ["load_wcs"]
 
 
-def load_wcs(input_model, reference_files=None, nrs_slit_y_range=None, nrs_ifu_slice_wcs=False):
+def load_wcs(input_model, reference_files=None, nrs_slit_y_range=None, mirifu_thresh=7, nrs_ifu_slice_wcs=False):
     """
     Create a gWCS object and store it in ``Model.meta``.
 
@@ -38,6 +38,7 @@ def load_wcs(input_model, reference_files=None, nrs_slit_y_range=None, nrs_ifu_s
         diagnostic purposes.  If False and the exposure type is NIRSpec IFU,
         a slice map is internally applied to produce a fully coordinate-based
         WCS pipeline that does not require slice IDs on input.
+    mirifu_thresh : value
 
     Returns
     -------
@@ -70,7 +71,8 @@ def load_wcs(input_model, reference_files=None, nrs_slit_y_range=None, nrs_ifu_s
     if instrument.lower() == "nirspec":
         pipeline = mod.create_pipeline(input_model, reference_files, slit_y_range=nrs_slit_y_range)
     else:
-        pipeline = mod.create_pipeline(input_model, reference_files)
+        print('mirifu thresh: ', mirifu_thresh)
+        pipeline = mod.create_pipeline(input_model, reference_files, mirifu_thresh=mirifu_thresh)
     # Initialize the output model as a copy of the input
     # Make the copy after the WCS pipeline is created in order to pass updates to the model.
     if pipeline is None:
