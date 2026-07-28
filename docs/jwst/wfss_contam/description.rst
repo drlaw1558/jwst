@@ -79,7 +79,9 @@ Here we describe the steps used to perform the contamination correction:
    from the simulated cutout, leaving only the simulated spectra of any nearby
    contaminating sources.
 4. The simulated contamination cutout is subtracted from the observed source cutout,
-   thereby removing the signal from contaminating spectra.
+   thereby removing the signal from contaminating spectra. If polynomial fitting is 
+   enabled, see the section on :ref:`polynomial_flux_modeling` below for details
+   on how this modifies steps 3 & 4.
 
 Outputs
 -------
@@ -96,6 +98,100 @@ There is one primary output and two optional outputs from the step:
 3. If the step argument ``--save_contam_images`` is set to `True`, the simulated
    contamination cutouts (the result of step 3 above) are saved to a file.
    See :ref:`wfss_contam_step_args`.
+
+.. _polynomial_flux_modeling:
+
+Multi-Band Direct Imaging
+-------------------------
+
+By default, each source is simulated with a spectrally flat flux model - that is, the
+flux at every wavelength is taken directly from the pixel values of a single input direct image.
+If desired, e.g. if multiple direct images are available in different filters, one can specify
+fluxes at multiple wavelengths in each direct-image pixel. This is done by replacing the direct
+image (`_i2d`) file in the input association with a `~stdatamodels.jwst.datamodels.WFSSCubeModel`
+file. This file contains a 3-D array in its ``model.data`` attribute, where the last two dimensions
+are the spatial dimensions of the direct image, and the first dimension has the same length as the
+number of direct images provided. The ``model.wavelength`` attribute is a 1-D array
+that specifies the corresponding wavelengths.
+See the `JWST pipeline notebooks <https://jwst-docs.stsci.edu/jwst-science-calibration-pipeline/jwst-pipeline-notebooks>`_
+for examples of how to create a `~stdatamodels.jwst.datamodels.WFSSCubeModel` file from
+multiple direct images, and how to run it through the pipeline.
+
+When the step encounters a `~stdatamodels.jwst.datamodels.WFSSCubeModel` file in place of the direct image,
+it performs a linear interpolation in wavelength for each pixel to determine the flux at the simulated
+dispersed wavelengths. This allows the step to improve its simulation based on known spectral information.
+The utility of this approach is not limited to the case of multiple direct images in a single observation;
+arbitrarily complex spectral information can be encoded by hand-editing the model, e.g. to include stellar
+simulations for certain sources. Any number of wavelengths can be included in the model.
+
+If the dispersed wavelengths extend outside the wavelengths specified in the
+``model.wavelength``, a flat extrapolation is used. If NaNs are encountered in a given pixel at some
+wavelengths but not others, they are filled in as if those pixels did not exist: if the NaN is bounded
+in the wavelength dimension by valid flux values, it is filled in with a linear interpolation in wavelength;
+if the NaN is only bounded on one side by valid flux values, it is filled in with a flat extrapolation
+of the nearest valid value. If the whole wavelength dimension is NaN, that pixel is not modeled at all.
+
+Note that the last two dimensions of the data must match the shape of the segmentation map.
+As normal, nonzero pixels in the segmentation map are the ones that get simulated.
+
+
+Polynomial Flux Modeling
+------------------------
+
+By default, each source is simulated with a spectrally flat flux model - that is, the
+flux at every wavelength is taken directly from the direct image pixel values. 
+When the step argument ``--polyfit_degree`` is set to an integer ``N``, the step
+fits a spectral model to each source, starting with the brightest sources first.
+The procedure is:
+
+1. In addition to the standard flat-spectrum simulation (the constant, degree-0 term),
+   *N* additional grism-frame images are simulated for each source, where for the *i*\ th
+   simulation from *i* = 1 to *i* = *N*, the spectral flux distribution is assumed to follow
+   the *i*\ th order Legendre polynomial. Legendre polynomials were chosen because
+   they form an orthogonal basis set, which makes the fitter prefer smaller coefficients
+   instead of oscillating large positive and negative coefficients.
+   Recall that each dispersed-image pixel represents
+   a linear combination of the contribution of several direct-image pixels at different
+   wavelengths. These basis functions therefore must be computed before the dispersed image
+   is discretized onto a pixel grid, i.e., just after the dispersion calculation.
+
+2. For each source, the observed 2D spectrum is fit as a linear combination of
+   these :math:`N+1` basis images, i.e.
+
+   .. math::
+
+      \text{observed} \approx c_0 \cdot B_0 + c_1 \cdot P_1(\lambda) + \cdots + c_N \cdot P_N(\lambda)
+
+   where :math:`B_0` is the flat-spectrum simulation and :math:`P_k(\lambda)` is the simulation
+   driven by the :math:`k`-th order Legendre polynomial flux model.  The coefficients :math:`c_k` are
+   determined using a linear least-squares fit with L2 regularization, the strength of 
+   which is set by the step argument ``--l2_alpha``. The regularization helps to
+   keep the coefficients small, guarding against physically implausible flux distributions.
+
+3. The fitted coefficients are checked to see if the fitted constant term coefficient,
+   :math:`c_0`, deviates from unity by more than a threshold set by the step argument
+   ``--rejection_threshold``. If it does, the fit is rejected and the contamination estimate
+   for that source is not updated on that iteration. This is used to avoid fits "blowing up"
+   in cases where the polynomial fit has returned an unphysical total flux level,
+   which typically occurs if background subtraction was imperfect or if the source sits
+   in a highly contaminated region.
+
+4. If a good solution was found, the best-fit linear combination replaces the original
+   simulation for that source, and this spectrally corrected simulation is used in the
+   contamination model. The contamination model is updated immediately after each source
+   is fit, so fainter sources fit later in an iteration can benefit from the improved
+   contamination correction from brighter sources fit earlier in the same iteration.
+   If no good solution was found, the original flat-spectrum simulation is not modified.
+
+The ``--n_iterations`` argument controls how many times the polynomial fit is repeated.
+On the first iteration only the flat-spectrum simulated contamination has been subtracted from the
+observed spectrum; on subsequent iterations it is replaced by the updated contamination correction
+based on the spectra from the previous pass.
+In practice, the polynomial fit typically converges for the majority of sources on the first
+iteration, and the second iteration improves fits and allows more fits to be accepted in
+highly-contaminated regions.  ``n_iterations > 2`` typically does not
+provide much additional improvement.
+Iteration has no effect when ``--polyfit_degree`` is not set.
 
 Multiprocessing
 ---------------

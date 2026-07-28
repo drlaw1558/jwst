@@ -6,12 +6,11 @@ from collections import defaultdict
 from os.path import split
 from pathlib import Path
 
-from stpipe.format_template import FormatTemplate
-
 from jwst.associations import Association, ListCategory, libpath
 from jwst.associations.exceptions import (
     AssociationNotValidError,
 )
+from jwst.associations.format_template import FormatTemplate
 from jwst.associations.lib.acid import ACID
 from jwst.associations.lib.constraint import (
     Constraint,
@@ -469,7 +468,7 @@ class Utility:
             )
             return level1b_name
 
-        if member_exptype == "background":
+        if (member_exptype == "background") or exp_type in ("mir_wfss", "nis_wfss", "nrc_wfss"):
             suffix = "x1d"
         else:
             if exp_type in LEVEL2B_EXPTYPES:

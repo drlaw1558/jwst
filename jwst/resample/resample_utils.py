@@ -17,7 +17,7 @@ from stcal.resample.utils import build_mask as _stcal_build_mask
 from stcal.resample.utils import compute_mean_pixel_area
 from stdatamodels.jwst.datamodels.dqflags import pixel
 
-__all__ = ["build_mask", "resampled_wcs_from_models"]
+__all__ = ["build_mask", "resampled_wcs_from_models", "multi_sregion_to_list"]
 
 log = logging.getLogger(__name__)
 
@@ -44,15 +44,15 @@ def resampled_wcs_from_models(
         model's WCS at the fiducial point (taken as the ``ref_ra`` and
         ``ref_dec`` from the ``wcsinfo`` meta attribute of the first input
         image). Ignored when ``pixel_scale`` is specified.
-    pixel_scale : float, None, optional
+    pixel_scale : float or None, optional
         Desired pixel scale (in degrees) of the output WCS. When provided,
         overrides ``pixel_scale_ratio``.
-    output_shape : tuple of two integers (int, int), None, optional
-        Shape of the image (data array) using ``np.ndarray`` convention
+    output_shape : tuple of two integers (int, int) or None, optional
+        Shape of the image (data array) using ``numpy`` convention
         (``ny`` first and ``nx`` second). This value will be assigned to
         ``pixel_shape`` and ``array_shape`` properties of the returned
         WCS object.
-    rotation : float, None, optional
+    rotation : float or None, optional
         Position angle of output image's Y-axis relative to North.
         A value of 0.0 would orient the final output image to be North up.
         The default of `None` specifies that the images will not be rotated,
@@ -60,11 +60,11 @@ def resampled_wcs_from_models(
         camera with the x and y axes of the resampled image corresponding
         approximately to the detector axes. Ignored when ``transform`` is
         provided.
-    crpix : tuple of float, None, optional
+    crpix : tuple of float or None, optional
         Position of the reference pixel in the resampled image array.
         If ``crpix`` is not specified, it will be set to the center of the
         bounding box of the returned WCS object.
-    crval : tuple of float, None, optional
+    crval : tuple of float or None, optional
         Right ascension and declination of the reference pixel.
         Automatically computed if not provided.
 
@@ -94,7 +94,10 @@ def resampled_wcs_from_models(
         # get s_regions from model meta without loading the whole models into memory
         for i in range(len(input_models)):
             meta = input_models.read_metadata(i)
-            sregion_list.append(meta["meta.wcsinfo.s_region"])
+            sreg_string = meta["meta.wcsinfo.s_region"]
+            # In some cases S_REGION contains multiple polygons.
+            # The helper function handles this
+            sregion_list.extend(multi_sregion_to_list(sreg_string))
 
     if not sregion_list:
         raise ValueError("No input models.")
@@ -142,37 +145,17 @@ def build_mask(dqarr, bitvalue):
 
     Parameters
     ----------
-    dqarr : numpy.ndarray
+    dqarr : ndarray
         Data quality array.
     bitvalue : int
         Bit value to be used for flagging good pixels.
 
     Returns
     -------
-    numpy.ndarray
+    ndarray
         Bit mask, where 1 is good and 0 is bad.
     """
     return _stcal_build_mask(dqarr=dqarr, good_bits=bitvalue, flag_name_map=pixel)
-
-
-def is_sky_like(frame):
-    """
-    Check that a frame is a sky-like frame by looking at its output units.
-
-    If output units are either ``deg`` or ``arcsec`` the frame is considered
-    a sky-like frame (as opposite to, e.g., a Cartesian frame.)
-
-    Parameters
-    ----------
-    frame : gwcs.wcs.WCS
-        WCS object to check.
-
-    Returns
-    -------
-    bool
-        ``True`` if the frame is sky-like, ``False`` otherwise.
-    """
-    return u.Unit("deg") in frame.unit or u.Unit("arcsec") in frame.unit
 
 
 def load_custom_wcs(asdf_wcs_file, output_shape=None):
@@ -182,13 +165,13 @@ def load_custom_wcs(asdf_wcs_file, output_shape=None):
     Parameters
     ----------
     asdf_wcs_file : str
-        Path to an ASDF file containing a GWCS structure. The WCS object
-        must be under the ``"wcs"`` key. Additional keys recognized by
-        :py:func:`load_custom_wcs` are: ``"pixel_area"``, ``"pixel_scale"``,
+        Path to an ASDF file containing a `~gwcs.wcs.GWCS` structure. The WCS object
+        must be under the ``"wcs"`` key. Additional keys recognized
+        are: ``"pixel_area"``, ``"pixel_scale"``,
         ``"pixel_shape"``, and ``"array_shape"``. The latter two are used only
         when the WCS object does not have the corresponding attributes set.
         Pixel scale and pixel area should be provided in units of ``arcsec``
-        and ``arcsec**2``.
+        and ``arcsec**2``, respectively.
     output_shape : tuple of int, optional
         Array shape for the output data.  If not provided,
         the custom WCS must specify one of (in order of priority):
@@ -245,19 +228,19 @@ def load_custom_wcs(asdf_wcs_file, output_shape=None):
 
 def find_miri_lrs_sregion(sregion_model1, wcs):
     """
-    Find s region for MIRI LRS resampled data.
+    Find S_REGION for MIRI LRS resampled data.
 
     Parameters
     ----------
     sregion_model1 : str
-        The s_regions of the first input model
-    wcs : gwcs.wcs.WCS
+        The ``s_region``'s of the first input model.
+    wcs : `~gwcs.wcs.WCS`
         Spatial/spectral WCS.
 
     Returns
     -------
     sregion : str
-        The s_region for the resample data.
+        The ``s_region`` for the resample data.
     """
     # use the first sregion to set the width of the slit
     spatial_box = sregion_model1
@@ -327,3 +310,21 @@ def find_miri_lrs_sregion(sregion_model1, wcs):
     footprint = np.array(footprint)
     s_region = compute_s_region_keyword(footprint)
     return s_region
+
+
+def multi_sregion_to_list(sregion):
+    """
+    Convert a multi S_REGION string to a list of individual S_REGION strings.
+
+    Parameters
+    ----------
+    sregion : str
+        A multi S_REGION string.
+
+    Returns
+    -------
+    list of str
+        A list of individual S_REGION strings.
+    """
+    slist = sregion.split("POLYGON ICRS")
+    return ["POLYGON ICRS " + s for s in map(str.strip, slist) if s]

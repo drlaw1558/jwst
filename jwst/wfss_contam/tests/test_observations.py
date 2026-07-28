@@ -21,7 +21,6 @@ def observation(direct_image_with_gradient, segmentation_map, grism_wcs):
     direct_image_with_gradient still needs to be run to produce the file,
     even though it is not called directly
     """
-    seg = segmentation_map.data
     return Observation(
         direct_image_with_gradient.data,
         segmentation_map.data,
@@ -115,7 +114,7 @@ def test_disperse_order(observation, segmentation_map, chunk_size):
     assert len(obs.simulated_slits.slits) == 8
     slit = obs.simulated_slits.slits[1]
     # check metadata
-    assert slit.name == "source_51"
+    assert slit.name == "51"
     assert slit.data.shape == (slit.ysize, slit.xsize)
 
     # Result should be close to the same for all chunk sizes

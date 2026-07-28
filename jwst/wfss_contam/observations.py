@@ -124,6 +124,7 @@ class Observation:
         max_cpu=1,
         max_pixels_per_chunk=5e4,
         oversample_factor=2,
+        band_wavelengths=None,
     ):
         """
         Initialize all data and metadata for a given observation.
@@ -131,7 +132,8 @@ class Observation:
         Parameters
         ----------
         direct_image : np.ndarray
-            Direct imaging data.
+            Direct imaging data.  May be 2-D ``(ny, nx)`` for a single-band
+            direct image, or 3-D ``(N, ny, nx)`` for a multi-band cube.
         segmentation_map : np.ndarray
             Segmentation map data.
         grism_wcs : `~gwcs.wcs.WCS`
@@ -146,6 +148,9 @@ class Observation:
             Maximum number of pixels per chunk when dispersing sources
         oversample_factor : int, optional
             Factor by which to oversample the wavelength grid
+        band_wavelengths : array-like of shape (N,), optional
+            Central wavelengths (in microns) for each plane of a 3-D ``direct_image``.
+            Required when ``direct_image`` is 3-D; ignored when ``direct_image`` is 2-D.
         """
         if boundaries is None:
             boundaries = []
@@ -160,8 +165,17 @@ class Observation:
         self.max_pixels_per_chunk = max_pixels_per_chunk
         self.oversample_factor = oversample_factor
 
-        # ensure the direct image has background subtracted
-        self.dimage = background_subtract(direct_image)
+        if direct_image.ndim == 2:
+            # use placeholder value since disperse() is going to see a flat SED and ignore this
+            self.band_wavelengths = np.array([1.0])
+            self.dimage = background_subtract(direct_image)
+        else:
+            # 3-D cube
+            if band_wavelengths is None:
+                raise ValueError("band_wavelengths must be provided when direct_image is 3-D")
+            self.band_wavelengths = np.asarray(band_wavelengths, dtype=float)
+            # apply background subtraction independently to each wavelength plane
+            self.dimage = np.array([background_subtract(plane) for plane in direct_image])
 
         # Set the limits of the dispersed image to be simulated
         if len(boundaries) == 0:
@@ -189,10 +203,23 @@ class Observation:
         """Create flat lists of pixels to be dispersed."""
         self.ys, self.xs = np.nonzero(self.seg)
         self.source_ids_per_pixel = self.seg[self.ys, self.xs]
-        self.fluxes = self.dimage[self.ys, self.xs]
+        if self.dimage.ndim == 2:
+            # Give it an extra dimension to make it shape (1, n_pixels)
+            self.fluxes = self.dimage[self.ys, self.xs][np.newaxis, :]
+        else:
+            # Shape (N, n_pixels), where N is the number of input direct image bands
+            self.fluxes = self.dimage[:, self.ys, self.xs]
 
     def chunk_sources(
-        self, order, wmin, wmax, sens_waves, sens_response, selected_ids=None, max_pixels=1e5
+        self,
+        order,
+        wmin,
+        wmax,
+        sens_waves,
+        sens_response,
+        selected_ids=None,
+        max_pixels=1e5,
+        basis_models=None,
     ):
         """
         Chunk the sources into groups of max_pixels.
@@ -213,6 +240,11 @@ class Observation:
             List of source IDs to process. If None, all sources are processed.
         max_pixels : int, optional
             Maximum number of pixels per chunk.
+        basis_models : list of callables, optional
+            Flux distributions to evaluate at each wavelength. Typically these will be
+            Legendre polynomials from 1st order up to a given max order, e.g.
+            [P1(x), P2(x), ...], the coefficients of which are linearly fit later.
+            If None, no models are included in the output.
 
         Returns
         -------
@@ -230,7 +262,7 @@ class Observation:
         # Get pixels for selected sources
         selected_xs = self.xs[selected_mask]
         selected_ys = self.ys[selected_mask]
-        selected_fluxes = self.fluxes[selected_mask]
+        selected_fluxes = self.fluxes[:, selected_mask]
         selected_source_ids = self.source_ids_per_pixel[selected_mask]
 
         # Sort by source ID to keep sources mostly together
@@ -239,7 +271,7 @@ class Observation:
         sort_indices = np.argsort(selected_source_ids)
         sorted_xs = selected_xs[sort_indices]
         sorted_ys = selected_ys[sort_indices]
-        sorted_fluxes = selected_fluxes[sort_indices]
+        sorted_fluxes = selected_fluxes[:, sort_indices]
         sorted_source_ids = selected_source_ids[sort_indices]
 
         # Split into chunks of max_pixels
@@ -257,7 +289,7 @@ class Observation:
 
             chunk_xs = sorted_xs[start_idx:end_idx]
             chunk_ys = sorted_ys[start_idx:end_idx]
-            chunk_fluxes = sorted_fluxes[start_idx:end_idx]
+            chunk_fluxes = sorted_fluxes[:, start_idx:end_idx]
             chunk_source_ids = sorted_source_ids[start_idx:end_idx]
 
             disperse_args.append(
@@ -265,6 +297,7 @@ class Observation:
                     chunk_xs,
                     chunk_ys,
                     chunk_fluxes,
+                    self.band_wavelengths,
                     chunk_source_ids,
                     order,
                     wmin,
@@ -275,12 +308,15 @@ class Observation:
                     self.grism_wcs,
                     self.naxis,
                     self.oversample_factor,
+                    basis_models,
                 ]
             )
 
         return disperse_args
 
-    def disperse_order(self, order, wmin, wmax, sens_waves, sens_response, selected_ids=None):
+    def disperse_order(
+        self, order, wmin, wmax, sens_waves, sens_response, selected_ids=None, basis_models=None
+    ):
         """
         Disperse the sources for a given spectral order, with multiprocessing.
 
@@ -300,6 +336,10 @@ class Observation:
             Response (flux calibration) array from photom reference file
         selected_ids : list, optional
             List of source IDs to process. If None, all sources are processed.
+        basis_models : list of callables, optional
+            Flux distributions to evaluate at each wavelength. Typically these will be single
+            polynomial orders, e.g. [lambda x: x, lambda x: x^2], ...] the coefficients of which
+            are linearly fit later. If None, no models are included in the output.
         """
         # generate lists of input parameters for the disperse function
         # for each chunk of sources
@@ -311,6 +351,7 @@ class Observation:
             sens_response,
             selected_ids=selected_ids,
             max_pixels=self.max_pixels_per_chunk,
+            basis_models=basis_models,
         )
         t0 = time.time()
         if self.max_cpu > 1:
@@ -348,6 +389,11 @@ class Observation:
             bounds = source_results[sid]["bounds"]
             img = source_results[sid]["image"]
             slit = _construct_slitmodel(img, bounds, sid, order)
+            fluxmodels = source_results[sid].get("model_counts", [])
+            for i, fm in enumerate(fluxmodels):
+                # use i+1 indexing because typically the first model will be the linear order
+                # for polynomial fitting. The 0th order is what's already in slit.data
+                setattr(slit, f"fluxmodel_{i + 1}", fm)
             self.simulated_image[bounds[2] : bounds[3] + 1, bounds[0] : bounds[1] + 1] += img
             self.simulated_slits.slits.append(slit)
 
@@ -360,18 +406,20 @@ def _aggregate_by_source(results, sid, source_results):
     ----------
     results : dict
         Dictionary containing the results for each source ID in the current chunk, in the format:
-        {source_id: {"bounds": [xmin, xmax, ymin, ymax], "image": 2D array}}
+        {source_id: {"bounds": [xmin, xmax, ymin, ymax], "image": 2D array,
+        "model_counts": list of 2D arrays}}
     sid : int
         Source ID
     source_results : dict
-        Dictionary to store simulated image and bounds for each source ID, in the format:
-        {source_id: {"bounds": [xmin, xmax, ymin, ymax], "image": 2D array}}
+        Dictionary to store simulated image and bounds for each source ID,
+        in the same format as results but with images and bounds aggregated.
         Updated in place.
     """
     if sid not in source_results:
         source_results[sid] = {
             "bounds": results[sid]["bounds"],
             "image": results[sid]["image"],
+            "model_counts": results[sid].get("model_counts", []),
         }
         return
 
@@ -385,29 +433,36 @@ def _aggregate_by_source(results, sid, source_results):
         max(old_bounds[3], new_bounds[3]),
     ]
 
-    # Create combined image with the union of bounds
     combined_shape = (
         combined_bounds[3] - combined_bounds[2] + 1,
         combined_bounds[1] - combined_bounds[0] + 1,
     )
-    combined_image = np.zeros(combined_shape, dtype=float)
 
-    # Add existing image to combined image
-    old_y_start = old_bounds[2] - combined_bounds[2]
-    old_y_end = old_y_start + source_results[sid]["image"].shape[0]
-    old_x_start = old_bounds[0] - combined_bounds[0]
-    old_x_end = old_x_start + source_results[sid]["image"].shape[1]
-    combined_image[old_y_start:old_y_end, old_x_start:old_x_end] += source_results[sid]["image"]
+    # Helper to place an existing sub-image into the combined image
+    def _place(old_arr, old_b):
+        out = np.zeros(combined_shape, dtype=float)
+        y0 = old_b[2] - combined_bounds[2]
+        x0 = old_b[0] - combined_bounds[0]
+        out[y0 : y0 + old_arr.shape[0], x0 : x0 + old_arr.shape[1]] = old_arr
+        return out
 
-    # Add new image to combined image
-    new_y_start = new_bounds[2] - combined_bounds[2]
-    new_y_end = new_y_start + results[sid]["image"].shape[0]
-    new_x_start = new_bounds[0] - combined_bounds[0]
-    new_x_end = new_x_start + results[sid]["image"].shape[1]
-    combined_image[new_y_start:new_y_end, new_x_start:new_x_end] += results[sid]["image"]
+    old_img = _place(source_results[sid]["image"], old_bounds)
+    new_img = _place(results[sid]["image"], new_bounds)
+    combined_image = old_img + new_img
 
-    # Update source results
-    source_results[sid] = {"bounds": combined_bounds, "image": combined_image}
+    # Sum model_counts across chunks (same as image)
+    old_mcs = source_results[sid].get("model_counts", [])
+    new_mcs = results[sid].get("model_counts", [])
+    combined_mcs = [
+        _place(old_mc, old_bounds) + _place(new_mc, new_bounds)
+        for old_mc, new_mc in zip(old_mcs, new_mcs, strict=True)
+    ]
+
+    source_results[sid] = {
+        "bounds": combined_bounds,
+        "image": combined_image,
+        "model_counts": combined_mcs,
+    }
 
 
 def _construct_slitmodel(
@@ -438,7 +493,7 @@ def _construct_slitmodel(
     [thisobj_minx, thisobj_maxx, thisobj_miny, thisobj_maxy] = bounds
     slit = datamodels.SlitModel()
     slit.source_id = sid
-    slit.name = f"source_{sid}"
+    slit.name = f"{sid}"
     slit.xstart = thisobj_minx + 1  # FITS pixels are 1-indexed, matching extract_2d convention
     slit.xsize = thisobj_maxx - thisobj_minx + 1
     slit.ystart = thisobj_miny + 1  # FITS pixels are 1-indexed, matching extract_2d convention

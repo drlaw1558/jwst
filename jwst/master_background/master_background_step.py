@@ -53,7 +53,7 @@ class MasterBackgroundStep(Step):
 
         # First check if we should even do the subtraction.  If not, bail.
         if not self._do_sub(output_model):
-            record_step_status(output_model, "master_background", success=False)
+            record_step_status(output_model, "master_background", status="SKIPPED")
             return output_model
 
         # Check that data is a supported datamodel. If not, bail.
@@ -70,7 +70,7 @@ class MasterBackgroundStep(Step):
             log.warning(
                 f"Input {input_data} of type {type(output_model)} cannot be handled.  Step skipped."
             )
-            record_step_status(output_model, "master_background", success=False)
+            record_step_status(output_model, "master_background", status="FAILED")
             return output_model
 
         # If user-supplied master background, subtract it
@@ -114,7 +114,7 @@ class MasterBackgroundStep(Step):
                     f"Input {input_data} of type {type(output_model)} cannot be "
                     "handled without user-supplied background.  Step skipped."
                 )
-                record_step_status(output_model, "master_background", success=False)
+                record_step_status(output_model, "master_background", status="FAILED")
                 return output_model
 
             result, background_data = split_container(output_model)
@@ -124,7 +124,7 @@ class MasterBackgroundStep(Step):
                     "and no user-supplied background provided.  Skipping step."
                 )
                 log.warning(msg)
-                record_step_status(output_model, "master_background", success=False)
+                record_step_status(output_model, "master_background", status="FAILED")
                 return output_model
             asn_id = result.asn_table["asn_id"]
 
@@ -135,10 +135,7 @@ class MasterBackgroundStep(Step):
                 if (
                     model.meta.exposure.type == "NRS_IFU"
                     and model.spec[0].source_type == "EXTENDED"
-                ):
-                    this_is_ifu_extended = True
-                if model.meta.exposure.type == "MIR_MRS":
-                    # always treat as extended for MIRI MRS
+                ) or model.meta.exposure.type == "MIR_MRS":
                     this_is_ifu_extended = True
 
                 # Use "bkgdtarg is False" so we don't also get None cases
@@ -189,7 +186,7 @@ class MasterBackgroundStep(Step):
                     background_2d_collection, suffix="masterbg2d", force=True, asn_id=asn_id
                 )
 
-        record_step_status(result, "master_background", success=True)
+        record_step_status(result, "master_background", status="COMPLETE")
 
         # Clean up intermediate background models
         background_2d_collection.close()
@@ -336,40 +333,25 @@ def subtract_2d_background(source, background):
 
     Parameters
     ----------
-    source : `~stdatamodels.jwst.datamodels.JwstDataModel` or \
-             `~jwst.datamodels.container.ModelContainer`
+    source : `~stdatamodels.jwst.datamodels.JwstDataModel`
         The input science data, updated in place.
     background : `~stdatamodels.jwst.datamodels.JwstDataModel`
         The input background data.  Must be the same datamodel type as ``source``.
-        For a `~jwst.datamodels.container.ModelContainer`,
-        the source and background
-        models in the input containers must match one-to-one.
 
     Returns
     -------
     source : `~stdatamodels.jwst.datamodels.JwstDataModel`
         Input data with background subtracted.
     """
+    # Handle individual NIRSpec FS, NIRSpec MOS
+    if isinstance(source, datamodels.MultiSlitModel):
+        for slit, slitbg in zip(source.slits, background.slits, strict=False):
+            slit.data -= slitbg.data
+            slit.dq |= slitbg.dq
 
-    def _subtract_2d_background(model, background):
-        # Handle individual NIRSpec FS, NIRSpec MOS
-        if isinstance(model, datamodels.MultiSlitModel):
-            for slit, slitbg in zip(model.slits, background.slits, strict=False):
-                slit.data -= slitbg.data
-                slit.dq |= slitbg.dq
-
-        # Handle MIRI LRS, MIRI MRS and NIRSpec IFU
-        else:
-            model.data -= background.data
-            model.dq |= background.dq
-
-    if isinstance(source, ModelContainer):
-        # Handle containers of many datamodels
-        for model, bg in zip(source, background, strict=False):
-            _subtract_2d_background(model, bg)
-
+    # Handle MIRI LRS, MIRI MRS and NIRSpec IFU
     else:
-        # Handle single datamodels
-        _subtract_2d_background(source, background)
+        source.data -= background.data
+        source.dq |= background.dq
 
     return source
