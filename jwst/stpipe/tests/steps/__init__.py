@@ -4,7 +4,7 @@ from jwst.stpipe import Pipeline, Step
 
 from stdatamodels.jwst import datamodels
 from stdatamodels.jwst.datamodels import ImageModel
-from jwst.datamodels import ModelContainer, ModelLibrary
+from jwst.datamodels import ModelContainer
 from jwst.stpipe.utilities import record_step_status
 
 
@@ -80,25 +80,6 @@ class WithDefaultsStep(Step):
         )
 
         return input_data
-
-
-class MakeListStep(Step):
-    """Make a list of all arguments and parameters."""
-
-    spec = """
-    par1 = float() # Control the frobulization
-    par2 = string() # Reticulate the splines
-    par3 = boolean(default=False) # Does it blend?
-    """
-
-    def process(self, a=None, b=None):  # noqa: D102
-        log.info("Arguments a=%s b=%s", a, b)
-        log.info("Parameters par1=%s, par2=%s, par3=%s", self.par1, self.par2, self.par3)
-
-        result = [item for item in [a, b, self.par1, self.par2, self.par3] if item is not None]
-
-        log.info("The list is %s", result)
-        return result
 
 
 class OptionalRefTypeStep(Step):
@@ -260,21 +241,6 @@ class SavePipeline(Pipeline):
         return r
 
 
-class MakeListPipeline(Pipeline):
-    """A pipeline that calls MakeListStep."""
-
-    spec = """
-    par1 = string(default='Name the atomizer') # Control the frobulization
-    """
-
-    step_defs = {
-        "make_list": MakeListStep,
-    }
-
-    def process(self, *args):  # noqa: D102
-        return self.make_list.run(*args)
-
-
 class CalLogsStep(Step):
     """Step for testing cal_logs."""
 
@@ -428,6 +394,20 @@ class PrepareOutputAsTypeStep(Step):
         log.info(f"Input data is {type(input_data)}")
 
         result = self.prepare_output(input_data, open_as_type=datamodels.IFUImageModel)
+        record_step_status(result, "prepare_output", True)
+        log.info(f"Output data is {type(result)}")
+
+        return result
+
+
+class PrepareOutputAsRampStep(Step):
+    """Step to test the prepare_output method with a datamodel type specified."""
+    class_alias = "prepare_output_as_ramp"
+
+    def process(self, input_data):
+        log.info(f"Input data is {type(input_data)}")
+
+        result = self.prepare_output(input_data, open_as_ramp=True)
         record_step_status(result, "prepare_output", True)
         log.info(f"Output data is {type(result)}")
 

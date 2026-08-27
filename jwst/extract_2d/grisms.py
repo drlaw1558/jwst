@@ -1,6 +1,4 @@
-#
-#  Module for 2d extraction of grism spectra
-#
+"""Functions for 2D extraction of grism spectra."""
 
 import copy
 import logging
@@ -18,14 +16,13 @@ from stdatamodels.jwst.transforms.models import IdealToV2V3
 
 from jwst.assign_wcs import util
 from jwst.lib.catalog_utils import read_source_catalog
-from jwst.lib.pipe_utils import generate_substripe_ranges
+from jwst.lib.stripe_utils import generate_substripe_ranges
 
 log = logging.getLogger(__name__)
 
 __all__ = [
     "extract_tso_object",
     "extract_grism_objects",
-    "clamp",
     "compute_dispersion",
     "compute_tso_wavelength_array",
     "compute_tso_offset_center",
@@ -53,7 +50,7 @@ def build_grism_submodel(
     Parameters
     ----------
     sub_model : `~stdatamodels.jwst.datamodels.SlitModel`
-        The SlitModel to be filled with arrays and WCS information.
+        The data model to be filled with arrays and WCS information.
     input_model : `~stdatamodels.jwst.datamodels.CubeModel`
         The parent model from which the 2D extraction is taken.
     xmin : int
@@ -68,7 +65,7 @@ def build_grism_submodel(
         The WCS object from the parent model, modified to fit the
         extracted region.
     compute_wavelength : bool
-        If True, compute the wavelength array of the extracted region.
+        If `True`, compute the wavelength array of the extracted region.
     order : int
         The spectral order of the extracted region.
     name : str, optional
@@ -85,7 +82,7 @@ def build_grism_submodel(
     Returns
     -------
     `~stdatamodels.jwst.datamodels.SlitModel`
-        The sub_model updated in-place.
+        The ``sub_model`` updated in-place.
     """
     # Cut out the subarray from the input data arrays
     ext_data = input_model.data[..., ymin : ymax + 1, xmin : xmax + 1].copy()
@@ -133,8 +130,8 @@ def build_grism_submodel(
     if source_ypos is not None:
         sub_model.source_ypos = source_ypos
     sub_model.source_id = 1
-    sub_model.bunit_data = input_model.meta.bunit_data
-    sub_model.bunit_err = input_model.meta.bunit_err
+    sub_model.meta.bunit_data = input_model.meta.bunit_data
+    sub_model.meta.bunit_err = input_model.meta.bunit_err
     if getattr(input_model, "int_times", None) is not None:
         sub_model.int_times = input_model.int_times.copy()
 
@@ -162,30 +159,30 @@ def extract_tso_object(
     ----------
     input_model : `~stdatamodels.jwst.datamodels.CubeModel` or \
                   `~stdatamodels.jwst.datamodels.ImageModel`
-        The input TSO data is an instance of a CubeModel (3D) or ImageModel (2D)
+        The input TSO data can be a cube (3D) or an image (2D).
 
     reference_files : dict
-        Needs to include the name of the wavelengthrange reference file
+        This dictionary must contain the name of the
+        WAVELENGTHRANGE reference file.
 
-    tsgrism_extract_height : int
+    tsgrism_extract_height : int, optional
         The extraction height, in total, for the spectrum in the
         cross-dispersion direction. If this is other than None,
-        it will override the team default of 64 pixels. The team
+        it will override the default of 64 pixels. The instrument team
         wants the source centered near row 34, so the extraction
         height is not the same on either size of the central row.
 
-    extract_orders : list[ints]
-        This is an optional parameter that will override the
-        orders specified for extraction in the wavelengthrange
-        reference file.
+    extract_orders : list of int, optional
+        Overrides the orders specified for extraction in the
+        WAVELENGTHRANGE reference file.
 
-    compute_wavelength : bool
+    compute_wavelength : bool, optional
         Compute a wavelength array for the datamodel.
 
     Returns
     -------
     output_model : `~stdatamodels.jwst.datamodels.SlitModel`
-        Output SlitModel containing extracted spectrum
+        Output model containing extracted spectrum.
 
     Notes
     -----
@@ -202,7 +199,8 @@ def extract_tso_object(
     in the WFSS modes are overkill. Instead, similar structures are created
     during the extract2d process and then directly used.
 
-    https://jwst-docs.stsci.edu/near-infrared-camera/nircam-observing-modes/nircam-time-series-observations/nircam-grism-time-series
+    For more information on the NRC_TSGRISM mode, see:
+    https://jwst-docs.stsci.edu/jwst-near-infrared-camera/nircam-observing-modes/nircam-time-series-observations/nircam-grism-time-series
     """
     # Check for reference files
     if not isinstance(reference_files, dict):
@@ -402,7 +400,7 @@ def _extract_tso_dhs_object(
                   `~stdatamodels.jwst.datamodels.ImageModel`
         The input TSO DHS data.
     wavelengthrange : list
-        The wavelength range table from the wavelengthrange reference file.
+        The wavelength range table from the WAVELENGTHRANGE reference file.
     available_orders : list of int
         The spectral orders to extract.
     compute_wavelength : bool
@@ -411,7 +409,7 @@ def _extract_tso_dhs_object(
     Returns
     -------
     output_model : `~stdatamodels.jwst.datamodels.MultiSlitModel`
-        Output MultiSlitModel with one slit per stripe.
+        Output model with one slit per stripe.
     """
     output_model = datamodels.MultiSlitModel()
     output_model.update(input_model)
@@ -426,7 +424,7 @@ def _extract_tso_dhs_object(
         # name rather than unique regions values.
         subarray_stripenum = int(input_model.meta.subarray.name.split("STRIPE")[1][0])
         stripe_set = np.array(range(subarray_stripenum)) + 1
-        _, sub_ranges = generate_substripe_ranges(input_model, subarray_ranges=True)
+        sub_ranges = generate_substripe_ranges(input_model, science_frame=True)["subarray"]
     else:
         # For short wavelength detectors, use region values directly
         stripe_set = np.unique(all_stripes[~np.isnan(all_stripes)].astype(int))
@@ -524,103 +522,106 @@ def extract_grism_objects(
     nbright=None,
 ):
     """
-    Extract 2d boxes around each objects spectra for each order.
+    Extract 2D boxes around each objects spectra for each order.
 
     Parameters
     ----------
-    input_model : `~jwst.datamodels.ImageModel`
-        An instance of an ImageModel, this is the grism image
+    input_model : `~stdatamodels.jwst.datamodels.ImageModel`
+        Model of the grism image.
 
-    grism_objects : list(GrismObject)
-        A list of GrismObjects
+    grism_objects : list of `~stdatamodels.jwst.transforms.GrismObject`
+        A list of grism objects.
 
     reference_files : dict
-        Needs to include the name of the wavelengthrange reference file
+        This dictionary must contain the name of the
+        WAVELENGTHRANGE reference file.
 
     extract_orders : int
-        Spectral orders to extract
+        Spectral orders to extract.
 
     source_ids : list
         List of source IDs to extract.
 
-    source_ra : list[float]
-        Source right ascensions to be processed. The nearest matching source to each RA/DEC pair
-        will be extracted. If both source_ids and source_ra/source_dec are provided,
+    source_ra : list of float
+        Source right ascensions to be processed. The nearest matching source to each RA/Dec pair
+        will be extracted. If both ``source_ids`` and ``source_ra``/``source_dec`` are provided,
         the lists will be combined and their union extracted.
 
-    source_dec : list[float]
-        Source declinations to be processed, must have same length as source_ra.
+    source_dec : list of float
+        Source declinations to be processed, must have same length as ``source_ra``.
 
     max_sep : float
-        Radius in arcseconds within which source_ra and source_dec will be matched
+        Radius in arcseconds within which ``source_ra`` and ``source_dec`` will be matched
         to sources in the catalog. If no source is found within this radius, a warning
-        will be emitted and no source will be extracted corresponding to that ra, dec pair.
-        Has effect for WFSS modes only.
+        will be emitted and no source will be extracted corresponding to that RA, Dec pair.
 
     mmag_extract : float
-        Sources with magnitudes fainter than this minimum magnitude extraction
-        cutoff will not be extracted
+        The minimum magnitude extraction cutoff. Sources fainter than this
+        will not be extracted.
 
     compute_wavelength : bool
         Compute a wavelength array for the datamodel.
 
-    wfss_extract_half_height : int, (optional)
-        Cross-dispersion extraction half height in pixels, WFSS mode.
+    wfss_extract_half_height : int
+        Cross-dispersion extraction half height in pixels.
         Overwrites the computed extraction height.
 
     nbright : int
-        Number of brightest objects to extract for WFSS mode.
+        Number of brightest objects to extract.
 
     Returns
     -------
-    output_model : `~jwst.datamodels.MultiSlitModel`
-        Output MultiSlitModel DataModel of extracted spectra
+    output_model : `~stdatamodels.jwst.datamodels.MultiSlitModel`
+        Output model of extracted spectra.
 
     Notes
     -----
-    This method supports NRC_WFSS and NIS_WFSS only
+    This method supports WFSS modes only.
 
-    GrismObject is a named tuple which contains distilled
+    `~stdatamodels.jwst.transforms.GrismObject`
+    is a named tuple which contains distilled
     information about each catalog object. It can be created
-    by calling jwst.assign_wcs.util.create_grism_bbox() which
-    will return a list of GrismObjects that contain the bounding
-    boxes that will be used to define the 2d extraction area.
+    by calling :func:`~jwst.assign_wcs.util.create_grism_bbox` which
+    will return a list of `~stdatamodels.jwst.transforms.GrismObject`
+    that contains the bounding
+    boxes that will be used to define the 2D extraction area.
 
     For each spectral order, the configuration file contains a
     magnitude-cutoff value. The total list of objects to extract is limited
     by both MMAG_EXTRACT and NBRIGHT. Sources with magnitudes fainter than the
     extraction cutoff (MMAG_EXTRACT) will not be extracted, but are
     accounted for when computing the spectral contamination and background
-    estimates. The default value is 99 right now.
-    NBRIGHT further limits the list to the NBRIGHT brightest objects.
-    The default value is 999 right now.
+    estimates; the default value is 99.
+    NBRIGHT further limits the list to the NBRIGHT brightest objects;
+    the default value is 999.
 
-    The sensitivity information from the original aXe style configuration
+    The sensitivity information from the original aXe-style configuration
     file needs to be modified by the passband of the filter used for
     the direct image to get the min and max wavelengths
-    which correspond to t=0 and t=1, this currently has been done by the team
-    and the min and max wavelengths to use to calculate t are stored in the
-    grism reference file as wavelengthrange.
+    which correspond to ``t=0`` and ``t=1``.
+    The min and max wavelengths used to calculate ``t`` are stored in the
+    grism WAVELENGTHRANGE reference file.
 
-    Step 1: Convert the source catalog from the reference frame of the
-            uberimage to that of the dispersed image.  For the Vanilla
-            Pipeline we assume that the pointing information in the file
-            headers is sufficient.  This will be strictly true if all images
-            were obtained in a single visit (same guide stars).
+    1. Convert the source catalog from the reference frame of the
+       uber-image to that of the dispersed image.
+       We assume that the pointing information in the file
+       headers is sufficient.  This will be strictly true if all images
+       were obtained in a single visit (same guide stars).
 
-    Step 2: Record source information for each object in the catalog: position
-            (RA and Dec), shape (A_IMAGE, B_IMAGE, THETA_IMAGE), and all
-            available magnitudes, and minimum bounding boxes
+    2. Record source information for each object in the catalog: position
+       (RA, Dec), shape (A_IMAGE, B_IMAGE, THETA_IMAGE), and all
+       available magnitudes, and minimum bounding boxes.
 
-    Step 3: Compute the trace and wavelength solutions for each object in the
-            catalog and for each spectral order.  Record this information.
+    3. Compute the trace and wavelength solutions for each object in the
+       catalog and for each spectral order.  Record this information.
 
-    Step 4: Compute the WIDTH of each spectral subwindow, which may be fixed or
-            variable. The cross-dispersion size is taken from the minimum
-            bounding box.
+    4. Compute the WIDTH of each spectral subwindow, which may be fixed or
+       variable. The cross-dispersion size is taken from the minimum
+       bounding box.
 
-    Each of the virtual slits in the output MultiSlitModel will have its own
-    WCS object that is a copy of the input_model WCS, but with an additional
+    Each of the virtual slits in the output
+    `~stdatamodels.jwst.datamodels.MultiSlitModel` will have its own
+    WCS object that is a copy of the input model's WCS, but with an additional
     transform from "grism_slit" to "grism_detector" prepended to it; this
     transform encodes a shift to the center of the slit and a binding to the
     slit's bounding box.
@@ -658,7 +659,7 @@ def extract_grism_objects(
         raise ValueError("No grism objects created from source catalog")
 
     log.info(f"Extracting {len(grism_objects)} grism objects")
-    output_model = datamodels.MultiSlitModel()
+    output_model = datamodels.MultiSlitModel(validate_on_assignment=False)
     output_model.update(input_model)
 
     # One WCS model can be used to govern all the extractions
@@ -691,13 +692,13 @@ def extract_grism_objects(
             # The bounding boxes here are also limited to the size of the detector
             # The check for boxes entirely off the detector is done in create_grism_bbox right now
             y, x = obj.order_bounding[order]
-            log.debug(f"YYY, {y}, {clamp(y[0], 0, input_model.meta.subarray.ysize)}")
 
             # limit the boxes to the detector
-            ymin = clamp(y[0], 0, input_model.meta.subarray.ysize)
-            ymax = clamp(y[1], 0, input_model.meta.subarray.ysize)
-            xmin = clamp(x[0], 0, input_model.meta.subarray.xsize)
-            xmax = clamp(x[1], 0, input_model.meta.subarray.xsize)
+            ymin = np.clip(y[0], 0, input_model.meta.subarray.ysize)
+            log.debug(f"YYY, {y}, {ymin}")
+            ymax = np.clip(y[1], 0, input_model.meta.subarray.ysize)
+            xmin = np.clip(x[0], 0, input_model.meta.subarray.xsize)
+            xmax = np.clip(x[1], 0, input_model.meta.subarray.xsize)
 
             # don't extract anything that ended up with zero dimensions in one axis
             # this means that it was identified as a partial order but only on one
@@ -757,6 +758,12 @@ def extract_grism_objects(
                 subwcs.insert_frame(
                     input_frame=grism_slit, output_frame="grism_detector", transform=tr
                 )
+                # Force the pipelines to share their grism_detector-world transforms.
+                # We want that transform to be serialized just once on save
+                # instead of copied a bunch of times.
+                # It was found that validation of all those copies is very slow, and inflates
+                # the file size unnecessarily.
+                subwcs.pipeline[1:] = inwcs.pipeline[:]
 
                 new_slit = datamodels.SlitModel(
                     data=ext_data,
@@ -765,6 +772,7 @@ def extract_grism_objects(
                     var_poisson=var_poisson,
                     var_rnoise=var_rnoise,
                     var_flat=var_flat,
+                    validate_on_assignment=False,  # for runtime
                 )
 
                 new_slit.meta.wcsinfo.spectral_order = order
@@ -793,10 +801,15 @@ def extract_grism_objects(
                 new_slit.source_id = obj.sid
                 new_slit.source_dec = obj.sky_centroid.dec.value
                 new_slit.source_ra = obj.sky_centroid.ra.value
-                new_slit.bunit_data = input_model.meta.bunit_data
-                new_slit.bunit_err = input_model.meta.bunit_err
+                new_slit.meta.bunit_data = input_model.meta.bunit_data
+                new_slit.meta.bunit_err = input_model.meta.bunit_err
                 slits.append(new_slit)
     output_model.slits.extend(slits)
+
+    # update s_region of 0th slit to match input model
+    if output_model.slits:
+        output_model.slits[0].meta.wcsinfo.s_region = input_model.meta.wcsinfo.s_region
+
     # In the case that there are no spectra to extract deleting the variables
     # will fail so add the try block.
     try:
@@ -813,32 +826,11 @@ def extract_grism_objects(
     return output_model
 
 
-def clamp(value, minval, maxval):
-    """
-    Return the value clipped between minval and maxval.
-
-    Parameters
-    ----------
-    value : float
-        The value to limit
-    minval : float
-        The minimal acceptable value
-    maxval : float
-        The maximum acceptable value
-
-    Returns
-    -------
-    value: float
-        The value that falls within the min-max range or the minimum limit
-    """
-    return max(minval, min(value, maxval))
-
-
 def compute_dispersion(wcs):
     """
     Compute the pixel dispersion.
 
-    Make a model for the pixel dispersion from the grismconf specs
+    Make a model for the pixel dispersion from the ``grismconf`` specs.
 
     Parameters
     ----------
@@ -847,24 +839,25 @@ def compute_dispersion(wcs):
 
     Returns
     -------
-    dispersion : ndarray-like
-        The pixel dispersion [in m].
+    dispersion : ndarray
+        The pixel dispersion in meters.
     """
     raise NotImplementedError
 
 
 def compute_tso_wavelength_array(slit):
     """
-    Compute the wavelength array for a slit with gwcs object.
+    Compute the wavelength array for a slit with WCS.
 
     Parameters
     ----------
-    slit : `~jwst.datamodels.SlitModel`
-        JWST slit datamodel containing a meta.wcs GWCS object
+    slit : `~stdatamodels.jwst.datamodels.SlitModel`
+        JWST slit datamodel containing a ``meta.wcs`` that is a
+        `~gwcs.wcs.WCS` object
 
     Returns
     -------
-    wavelength : numpy.array
+    wavelength : ndarray
         The wavelength array
     """
     wcs = slit.meta.wcs
@@ -882,27 +875,27 @@ def compute_tso_offset_center(
 
     In the case that an Offset Special Requirement is requested in the APT,
     the source is no longer at the aperture reference point.
-    The dither.x_offset and dither.y_offset values encode the offset
+    The ``dither.x_offset`` and ``dither.y_offset`` values encode the offset
     in units of arcseconds. They need to be translated from Ideal to
     detector coordinates and into pixel units.
 
     Parameters
     ----------
-    input_model : ImageModel
-        The input data model
-    distortion : DistortionModel
-        The distortion model
+    input_model : `~stdatamodels.jwst.datamodels.ImageModel`
+        The input data model.
+    distortion : `~stdatamodels.jwst.datamodels.DistortionModel`
+        The distortion model.
 
     Returns
     -------
-    xc, yc : tuple
-        The x and y center of the image in direct image coordinates
+    xc, yc : float
+        The x and y center of the image in direct image coordinates.
 
     Raises
     ------
     ValueError
-        If the distortion model requires less than four or more than five
-        inputs, a ValueError will be raised.
+        The distortion model requires less than four or more than five
+        inputs.
 
     Notes
     -----
@@ -933,16 +926,17 @@ def compute_tso_offset_center(
 
 def compute_wfss_wavelength(slit):
     """
-    Compute the wavelength array for a slit with gwcs object.
+    Compute the wavelength array for a slit with WCS.
 
     Parameters
     ----------
-    slit : `~jwst.datamodels.SlitModel`
-        JWST slit datamodel containing a meta.wcs GWCS object
+    slit : `~stdatamodels.jwst.datamodels.SlitModel`
+        JWST slit datamodel containing a ``meta.wcs`` that is a
+        `~gwcs.wcs.WCS` object
 
     Returns
     -------
-    wavelength : numpy.array
+    wavelength : ndarray
         The wavelength array
     """
     x, y = grid_from_bounding_box(slit.meta.wcs.bounding_box)
@@ -954,7 +948,7 @@ def radec_to_source_ids(catalog, source_ids=None, source_ra=None, source_dec=Non
     """
     Convert source RA/Dec lists to source IDs from the catalog.
 
-    If a source_ids list is provided, it will be combined with the
+    If a ``source_ids`` list is provided, it will be combined with the
     source IDs found from the RA/Dec lists to form a union.
 
     Parameters
@@ -965,20 +959,20 @@ def radec_to_source_ids(catalog, source_ids=None, source_ra=None, source_dec=Non
     source_ids : list
         List of source IDs to extract.
 
-    source_ra : list[float]
-        Source right ascensions to be processed. The nearest matching source to each RA/DEC pair
-        will be extracted. If both source_ids and source_ra/source_dec are provided,
+    source_ra : list of float
+        Source right ascensions to be processed. The nearest matching source to each RA/Dec pair
+        will be extracted. If both ``source_ids`` and ``source_ra``/``source_dec`` are provided,
         the lists will be combined and their union extracted.
 
-    source_dec : list[float]
-        Source declinations to be processed, must have same length as source_ra.
+    source_dec : list of float
+        Source declinations to be processed, must have same length as ``source_ra``.
 
     max_sep : float
         Maximum separation in arcsec to consider a catalog source a match to the provided RA/Dec.
 
     Returns
     -------
-    source_ids : np.ndarray or None
+    source_ids : ndarray or None
         List of unique source IDs to extract.
     """
     catalog = read_source_catalog(catalog)

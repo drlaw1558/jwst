@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 import logging
 
-from stdatamodels.jwst import datamodels
-
 from jwst.charge_migration import charge_migration_step
 from jwst.clean_flicker_noise import clean_flicker_noise_step
 from jwst.dark_current import dark_current_step
@@ -90,7 +88,7 @@ class Detector1Pipeline(Pipeline):
         log.info("Starting calwebb_detector1 ...")
 
         # open the input data as a RampModel
-        input_data = self.prepare_output(input_data, open_as_type=datamodels.RampModel)
+        input_data = self.prepare_output(input_data, open_as_ramp=True)
 
         # propagate output_dir to steps that might need it
         self.dark_current.output_dir = self.output_dir
@@ -121,9 +119,6 @@ class Detector1Pipeline(Pipeline):
             input_data = self.dark_current.run(input_data)
             input_data = self.refpix.run(input_data)
 
-            # skip until MIRI team has figured out an algorithm
-            # input_data = self.persistence(input_data)
-
         else:
             # process Near-IR exposures
             log.debug("Processing a Near-IR exposure")
@@ -135,11 +130,6 @@ class Detector1Pipeline(Pipeline):
             input_data = self.superbias.run(input_data)
             input_data = self.refpix.run(input_data)
             input_data = self.linearity.run(input_data)
-
-            # skip persistence for NIRSpec
-            if instrument != "NIRSPEC":
-                input_data = self.persistence.run(input_data)
-
             input_data = self.dark_current.run(input_data)
 
         # apply the charge_migration step
@@ -153,6 +143,9 @@ class Detector1Pipeline(Pipeline):
 
         # apply the clean_flicker_noise step
         input_data = self.clean_flicker_noise.run(input_data)
+
+        # persistence should be between flicker noise and ramp_fit.
+        input_data = self.persistence.run(input_data)
 
         # save the corrected ramp data, if requested
         if self.save_calibrated_ramp:

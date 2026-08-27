@@ -5,22 +5,24 @@ import asdf
 import numpy as np
 import pytest
 from astropy import coordinates as coord
+from astropy import wcs as astropy_wcs
 from astropy.io import fits
 from astropy.modeling import models
 from gwcs import coordinate_frames as cf
 from gwcs import wcs
 from gwcs.wcstools import grid_from_bounding_box
 from numpy.testing import assert_allclose
-from stcal.alignment.util import compute_scale
+from stcal.alignment.util import compute_scale, sregion_to_footprint
 from stcal.resample.utils import build_driz_weight, compute_mean_pixel_area
 from stdatamodels.jwst.datamodels import CubeModel, ImageModel, MultiSlitModel, dqflags
 
 from jwst.assign_wcs import AssignWcsStep
 from jwst.datamodels import ModelContainer, ModelLibrary
 from jwst.exp_to_source import multislit_to_container
+from jwst.extract_1d.source_location import location_from_wcs
 from jwst.extract_2d import Extract2dStep
 from jwst.resample import ResampleSpecStep, ResampleStep
-from jwst.resample.resample import input_jwst_model_to_dict
+from jwst.resample.resample import ResampleImage, input_jwst_model_to_dict
 from jwst.resample.resample_spec import ResampleSpec, compute_spectral_pixel_scale
 from jwst.resample.resample_step import GOOD_BITS
 from jwst.resample.resample_utils import load_custom_wcs
@@ -652,6 +654,10 @@ def test_pixel_scale_ratio_imaging(nircam_rate, ratio):
 
     assert result1.meta.resample.pixel_scale_ratio == 1.0
     assert result2.meta.resample.pixel_scale_ratio == ratio
+
+    # also check that background level is set to None for the resampled image:
+    assert result1.meta.background.level is None
+    assert result1.meta.background.subtracted is None
 
     im.close()
     result1.close()
@@ -1775,6 +1781,9 @@ def test_nirspec_lamp_pixscale(nirspec_lamp, tmp_path):
     assert_allclose(result.slits[0].data.shape[0], nirspec_lamp.slits[0].data.shape[0], atol=5)
     assert result.slits[0].data.shape[1] == nirspec_lamp.slits[0].data.shape[1]
 
+    # no output s_region since the WCS is not sky-like
+    assert result.slits[0].meta.wcsinfo.s_region is None
+
     # test pixel scale setting: will not work without sky-based WCS
     result2 = ResampleSpecStep.call(nirspec_lamp, pixel_scale=0.5)
     assert_allclose(result2.slits[0].data, result.slits[0].data, equal_nan=True)
@@ -1860,3 +1869,82 @@ def test_resample_imaging_pixmap_interpolation(nircam_rate):
     # ensure results are not identical (i.e. pixmap settings actually did something)
     with pytest.raises(AssertionError):
         assert_allclose(res.data, ref.data)
+
+
+def test_combine_input_sregions(nircam_rate):
+    """Ensure input S_REGION values that contain multiple polygons are handled."""
+    model = AssignWcsStep.call(nircam_rate, sip_approx=False)
+    input_sregion = model.meta.wcsinfo.s_region
+
+    # original expectation
+    resample_obj = ResampleImage(ModelLibrary([deepcopy(model)]))
+    expected_sregion = resample_obj.combine_input_sregions()
+
+    # expectation after duplicating input s_region
+    model.meta.wcsinfo.s_region = input_sregion + " " + input_sregion
+    resample_obj = ResampleImage(ModelLibrary([model]))
+    output_sregion = resample_obj.combine_input_sregions()
+    assert isinstance(output_sregion, str)
+    assert output_sregion.count("POLYGON") == 1
+    assert output_sregion.startswith("POLYGON ICRS ")
+
+    # turn these into arrays so we can assign a tolerance for comparison,
+    # to be robust to small numerical differences
+    expected_footprint = sregion_to_footprint(expected_sregion)
+    actual_footprint = sregion_to_footprint(output_sregion)
+    assert expected_footprint.shape == actual_footprint.shape
+
+    # sort by RA (first column) to ensure consistent ordering for comparison
+    expected_footprint = expected_footprint[np.argsort(expected_footprint[:, 0])]
+    actual_footprint = actual_footprint[np.argsort(actual_footprint[:, 0])]
+    assert_allclose(actual_footprint, expected_footprint, atol=1e-5, rtol=0)
+
+
+@pytest.mark.parametrize("use_source_location", [True, False])
+def test_spec_fits_wcs(tmp_path, nirspec_cal, use_source_location):
+    if not use_source_location:
+        nirspec_cal.slits[0].source_xpos = None
+        nirspec_cal.slits[0].source_ypos = None
+
+    im = ResampleSpecStep.call(
+        nirspec_cal, output_dir=str(tmp_path), save_results=True, output_file="test", suffix="s2d"
+    )
+    assert isinstance(im, MultiSlitModel)
+    assert (tmp_path / "test_s2d.fits").exists()
+
+    # FITS WCS requires a single wavetable with one column per slit
+    slit = im.slits[0]
+    assert im.wavetable is not None
+    # The column name is recorded in the slit metadata
+    assert slit.meta.wcsinfo.ps1_1 == f"wave_slit_{slit.name}"
+    assert slit.meta.wcsinfo.ps1_1 in im.wavetable.columns.names
+
+    # GWCS
+    x, y = grid_from_bounding_box(slit.meta.wcs.bounding_box)
+    ra, dec, gwcs_wave = slit.meta.wcs(x, y)
+    _, _, location, _ = location_from_wcs(slit, None, make_trace=False)
+
+    # FITS WCS
+    with fits.open(tmp_path / "test_s2d.fits") as hdul:
+        slit_wcs = astropy_wcs.WCS(hdul[1], hdul)
+        fits_wave, slit_pos = slit_wcs.pixel_to_world_values(x, y)
+
+        if use_source_location:
+            # Slit position is 0 at the source location
+            _, slit_center = slit_wcs.pixel_to_world_values(x, location)
+        else:
+            # Slit position is 0 at the center of the array
+            _, slit_center = slit_wcs.pixel_to_world_values(x, slit.data.shape[0] // 2)
+        np.testing.assert_allclose(slit_center, 0)
+
+    # Wavelengths are the same for the GWCS and FITS WCS
+    np.testing.assert_allclose(fits_wave, gwcs_wave)
+
+    # FITS WCS records spatial offset instead of RA/Dec
+    all_pos = coord.SkyCoord(ra, dec, unit="deg")
+    gwcs_diff = all_pos[1:].separation(all_pos[:-1]).to("arcsec").value
+    fits_diff = slit_pos[1:] - slit_pos[:-1]
+    np.testing.assert_allclose(gwcs_diff, fits_diff)
+    np.testing.assert_allclose(gwcs_diff, slit.meta.wcsinfo.cdelt2)
+
+    im.close()

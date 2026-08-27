@@ -13,18 +13,18 @@ __all__ = ["do_correction", "subtract_bias"]
 
 def do_correction(input_model, bias_model):
     """
-    Execute all tasks for Super-Bias Subtraction.
+    Execute all tasks for superbias Subtraction.
 
     Parameters
     ----------
-    input_model : RampModel
+    input_model : `~stdatamodels.jwst.datamodels.RampModel`
         Science data to be corrected
-    bias_model : SuperBiasModel
+    bias_model : `~stdatamodels.jwst.datamodels.SuperBiasModel`
         Bias data
 
     Returns
     -------
-    output_model : stdatamodels.jwst.datamodels.ramp.RampModel
+    output_model : `~stdatamodels.jwst.datamodels.RampModel`
         Bias-subtracted science data
     """
     # Check for subarray mode and extract subarray from the
@@ -52,25 +52,28 @@ def subtract_bias(output, bias):
 
     Parameters
     ----------
-    output : stdatamodels.jwst.datamodels.ramp.RampModel
+    output : `~stdatamodels.jwst.datamodels.RampModel`
         Input science data
-    bias : stdatamodels.jwst.datamodels.superbias.SuperBiasModel
+    bias : `~stdatamodels.jwst.datamodels.SuperBiasModel`
         Superbias image data
 
     Returns
     -------
-    output : stdatamodels.jwst.datamodels.ramp.RampModel
+    output : `~stdatamodels.jwst.datamodels.RampModel`
         Bias-subtracted science data
     """
-    # combine the science and superbias DQ arrays
+    # Combine the science and superbias DQ arrays
     output.pixeldq |= bias.dq
 
+    # Expand bias data to match science data if needed
     num_superstripe = getattr(output.meta.subarray, "num_superstripe", None)
     if num_superstripe is not None and num_superstripe > 0:
+        # Bias data is 3D, (nstripe, ny, nx)
         nints, ngroups, _, _ = output.data.shape
         bias_data = bias.data[:, np.newaxis, :, :].repeat(ngroups, axis=1)
         bias_data = np.tile(bias_data, reps=(nints // num_superstripe, 1, 1, 1))
     else:
+        # Bias data is 2D, (ny, nx)
         bias_data = bias.data
 
     # Subtract the superbias image from all groups and integrations
@@ -79,10 +82,13 @@ def subtract_bias(output, bias):
 
     # If ZEROFRAME is present, subtract the super bias.  Zero values
     # indicate bad data, so should be kept zero.
-    # TODO: this may need different handling for superstripe data.
     if output.meta.exposure.zero_frame:
         wh_zero = np.where(output.zeroframe == 0.0)
-        output.zeroframe -= bias.data
+        if bias_data.ndim == 4:
+            # use the first group from the bias data for superstripe
+            output.zeroframe -= bias_data[:, 0, :, :]
+        else:
+            output.zeroframe -= bias_data
         output.zeroframe[wh_zero] = 0.0  # Zero values indicate unusable data
 
     return output

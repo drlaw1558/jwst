@@ -5,12 +5,11 @@ import warnings
 
 import astropy.units as u
 import numpy as np
-import photutils
 from astropy.convolution import Gaussian2DKernel
 from astropy.nddata.utils import NoOverlapError, extract_array
 from astropy.stats import SigmaClip, gaussian_fwhm_to_sigma
 from astropy.table import QTable
-from astropy.utils import lazyproperty, minversion
+from astropy.utils import lazyproperty
 from astropy.utils.exceptions import AstropyUserWarning
 from photutils.aperture import CircularAnnulus, CircularAperture, aperture_photometry
 from scipy import ndimage
@@ -23,8 +22,6 @@ from jwst.source_catalog._wcs_helpers import pixel_scale_angle_at_skycoord
 log = logging.getLogger(__name__)
 
 __all__ = ["JWSTSourceCatalog"]
-
-PHOTUTILS_GE_3 = minversion(photutils, "2.3.1.dev")
 
 
 class JWSTSourceCatalog:
@@ -241,19 +238,23 @@ class JWSTSourceCatalog:
         rename_map = {
             "label": "id",
             "isophotal_flux": "flux",
-            "isophotal_flux_err": "segment_fluxerr",
             "isophotal_area": "area",
+            "semimajor_sigma": "semimajor_axis",
+            "semiminor_sigma": "semiminor_axis",
+            "isophotal_flux_err": "segment_flux_err",
         }
-        if PHOTUTILS_GE_3:
-            rename_new = {
-                "semimajor_sigma": "semimajor_axis",
-                "semiminor_sigma": "semiminor_axis",
-                "isophotal_flux_err": "segment_flux_err",
-            }
-            rename_map.update(rename_new)
 
         for column in self.segment_colnames:
-            # define the property name
+            # Compute 'orientation' with the `orientation` property,
+            # which always wraps the angle to the (-90, 90] deg
+            # convention. This avoids shadowing the `orientation`
+            # property with the raw segmentation-catalog value, which
+            # may be in a different range depending on the photutils
+            # version used to generate the catalog.
+            if column == "orientation":
+                continue
+
+            # Define the property name
             prop_name = rename_map.get(column, column)
             if prop_name in self.segm_cat.colnames:
                 value = self.segm_cat[prop_name]
@@ -380,6 +381,40 @@ class JWSTSourceCatalog:
         """
         return self.isophotal_abmag_err
 
+    @staticmethod
+    def _to_symmetric_orientation(theta):
+        """
+        Convert an orientation angle to the (-90, 90] deg convention.
+
+        Parameters
+        ----------
+        theta : `~astropy.units.Quantity`
+            The input orientation angle.
+
+        Returns
+        -------
+        `~astropy.units.Quantity`
+            The orientation angle in the range (-90, 90] degrees.
+        """
+        theta_deg = theta.to_value(u.deg)
+        return (90.0 - np.mod(90.0 - theta_deg, 180.0)) * u.deg
+
+    @lazyproperty
+    def orientation(self):
+        """
+        Return the orientation of the source major axis.
+
+        Returns
+        -------
+        `~astropy.units.Quantity`
+            The position angle of the source major axis. The angle
+            increases in the counter-clockwise direction and is
+            in the range (-90, 90] degrees.
+        """
+        if "orientation" not in self.segm_cat.colnames:
+            return np.nan
+        return self._to_symmetric_orientation(self.segm_cat["orientation"])
+
     @lazyproperty
     def sky_orientation(self):
         """
@@ -396,7 +431,8 @@ class JWSTSourceCatalog:
         )
         _, _, angle = pixel_scale_angle_at_skycoord(skycoord, self.wcs)
 
-        return ((180.0 * u.deg) - angle + self.orientation) % (360 * u.deg)
+        result = (180.0 * u.deg) - angle + self.orientation
+        return self._to_symmetric_orientation(result)
 
     def _make_aperture_colnames(self, name):
         """

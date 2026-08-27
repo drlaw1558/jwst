@@ -1,3 +1,5 @@
+"""Apply photometric calibration to science data."""
+
 import logging
 
 from stdatamodels.jwst import datamodels
@@ -38,8 +40,8 @@ class PhotomStep(Step):
 
         Returns
         -------
-        result : DataModel
-            DataModel with the photom correction applied
+        result : `~stdatamodels.jwst.datamodels.JwstDataModel`
+            Data model with the photom correction applied.
         """
         output_model = self.prepare_output(input_data)
 
@@ -52,12 +54,13 @@ class PhotomStep(Step):
             | datamodels.ImageModel
             | datamodels.IFUImageModel
             | datamodels.MultiSlitModel
-            | datamodels.TSOMultiSpecModel,
+            | datamodels.TSOMultiSpecModel
+            | datamodels.WFSSMultiSpecModel,
         ):
             log.warning(
                 "Input is not one of the supported model types: "
                 "CubeModel, ImageModel, IFUImageModel, "
-                "SlitModel, MultiSlitModel, or TSOMultiSpecModel."
+                "SlitModel, MultiSlitModel, TSOMultiSpecModel, or WFSSMultiSpecModel."
             )
             log.warning("Photom step will be skipped")
             output_model.meta.cal_step.photom = "SKIPPED"
@@ -65,15 +68,8 @@ class PhotomStep(Step):
 
         # Setup reference files and whether previous correction information
         # should be used.
-        if self.use_correction_pars and self.correction_pars:
-            log.info("Using previously specified correction parameters.")
-            correction_pars = self.correction_pars
-            phot_filename = correction_pars["refs"]["photom"]
-            area_filename = correction_pars["refs"]["area"]
-        else:
-            correction_pars = None
-            phot_filename = self.get_reference_file(output_model, "photom")
-            area_filename = self.get_reference_file(output_model, "area")
+        phot_filename = self.get_reference_file(output_model, "photom")
+        area_filename = self.get_reference_file(output_model, "area")
 
         log.info("Using photom reference file: %s", phot_filename)
         log.info("Using area reference file: %s", area_filename)
@@ -92,12 +88,9 @@ class PhotomStep(Step):
                 self.inverse,
                 self.source_type,
                 self.apply_time_correction,
-                correction_pars,
             )
             result = phot.apply_photom(phot_filename, area_filename)
             result.meta.cal_step.photom = "COMPLETE"
-            self.correction_pars = phot.correction_pars
-            self.correction_pars["refs"] = {"photom": phot_filename, "area": area_filename}
 
         except photom.DataModelTypeError:
             # should trip e.g. for NIRISS SOSS data in FULL subarray

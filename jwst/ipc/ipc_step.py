@@ -1,3 +1,5 @@
+"""Perform the IPC (Inter-Pixel Capacitance) correction step."""
+
 import logging
 
 from stdatamodels.jwst import datamodels
@@ -35,7 +37,7 @@ class IPCStep(Step):
             IPC-corrected science data model.
         """
         # Open the input data model
-        result = self.prepare_output(step_input, open_as_type=datamodels.RampModel)
+        result = self.prepare_output(step_input, open_as_ramp=True)
 
         # Get the name of the ipc reference file to use
         ipc_name = self.get_reference_file(result, "ipc")

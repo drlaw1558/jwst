@@ -84,7 +84,7 @@ def test_photom_fail(caplog):
     cube.close()
 
 
-def test_photom_correction_pars(input_model):
+def test_photom_inverse(input_model):
     step = PhotomStep()
     result = step.run(input_model)
 
@@ -92,10 +92,8 @@ def test_photom_correction_pars(input_model):
     nnan = ~np.isnan(input_model.slits[0].data) & ~np.isnan(result.slits[0].data)
     assert not np.allclose(result.slits[0].data[nnan], input_model.slits[0].data[nnan])
 
-    # use the computed correction and invert
+    # run again but invert
     new_step = PhotomStep()
-    new_step.use_correction_pars = True
-    new_step.correction_pars = step.correction_pars
     new_step.inverse = True
     inverse_result = new_step.run(result)
 
@@ -139,6 +137,10 @@ def test_photom_nrs_ifu():
     model.var_flat = model.get_default("var_flat")
     model = AssignWcsStep.call(model)
 
+    # Make one data pixel NaN, not matched with NaNs in the err/dq/var
+    bad_idx = (1414, 690)
+    model.data[bad_idx] = np.nan
+
     result = PhotomStep.call(model)
     assert result.meta.cal_step.photom == "COMPLETE"
 
@@ -148,7 +150,16 @@ def test_photom_nrs_ifu():
     assert not np.allclose(result.data, model.data)
     assert not np.allclose(result.err, model.err)
 
-    # inverting recovers the input
+    # NaNs and flags are matched for the bad pixel, input not modified
+    assert not np.isnan(model.err[bad_idx])
+    for ext in ["data", "err", "var_poisson", "var_rnoise", "var_flat"]:
+        assert np.isnan(getattr(result, ext)[bad_idx])
+    assert (result.dq[bad_idx] & datamodels.dqflags.pixel["DO_NOT_USE"]) > 0
+
+    # inverting recovers the input, except that the new NaN is not invertible
     inverse_result = PhotomStep.call(result, inverse=True)
     np.testing.assert_allclose(inverse_result.data, model.data)
-    np.testing.assert_allclose(inverse_result.err, model.err)
+    mask = np.full(model.err.shape, True)
+    mask[bad_idx] = False
+    np.testing.assert_allclose(inverse_result.err[mask], model.err[mask])
+    assert np.isnan(inverse_result.err[bad_idx])

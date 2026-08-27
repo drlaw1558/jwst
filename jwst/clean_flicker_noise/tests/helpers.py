@@ -39,7 +39,7 @@ def _add_metadata(model, shape):
     model.meta.instrument.name = "MIRI"
     model.meta.instrument.detector = "MIRIMAGE"
     model.meta.instrument.filter = "F480M"
-    model.meta.observation.date = "2015-10-13"
+    model.meta.observation.date = "2025-10-13"
     model.meta.observation.time = "00:00:00"
     model.meta.exposure.type = "MIR_IMAGE"
     model.meta.exposure.group_time = 1.0
@@ -48,9 +48,11 @@ def _add_metadata(model, shape):
     model.meta.subarray.ystart = 1
     model.meta.subarray.xsize = shape[3]
     model.meta.subarray.ysize = shape[2]
+    model.meta.exposure.start_time = 60728.97621633101
     model.meta.exposure.frame_time = 1.0
     model.meta.exposure.ngroups = shape[1]
     model.meta.exposure.group_time = 1.0
+    model.meta.exposure.integration_time = shape[1] * model.meta.exposure.group_time
     model.meta.exposure.nints = shape[0]
     model.meta.exposure.nframes = 1
     model.meta.exposure.groupgap = 0
@@ -306,7 +308,7 @@ def make_nrs_fs_full_ramp():
     RampModel
         A NIRSpec fixed slit ramp model.
     """
-    shape = (1, 2, 2048, 2048)
+    shape = (2, 2, 2048, 2048)
     model = datamodels.RampModel(shape)
 
     # Make data with a constant rate

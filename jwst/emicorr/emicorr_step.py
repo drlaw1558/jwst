@@ -1,9 +1,7 @@
 """Apply MIRI EMI correction."""
 
 import logging
-import warnings
 
-from stdatamodels.exceptions import ValidationWarning
 from stdatamodels.jwst import datamodels
 
 from jwst.emicorr import emicorr
@@ -27,7 +25,6 @@ class EmiCorrStep(Step):
         onthefly_corr_freq = float_list(default=None)  # Frequencies to use for correction
         use_n_cycles = integer(default=3)  # Use N cycles to calculate the phase, to use all integrations set to None
         fit_ints_separately = boolean(default=False)  # If True and algorithm is 'joint', each integration is separately fit.
-        user_supplied_reffile = string(default=None)  # Deprecated; use 'override_emicorr' instead
         save_intermediate_results = boolean(default=False)  # If True and a reference file is created on the fly, save it to disk
         skip = boolean(default=True)  # Skip the step
     """  # noqa: E501
@@ -48,26 +45,8 @@ class EmiCorrStep(Step):
         result : `~stdatamodels.jwst.datamodels.RampModel`
             EMI corrected output datamodel.
         """
-        # Open the input data model as a RampModel, catching a specific
-        # expected warning for uncal files
-        try:
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "error",
-                    message=r"(?s:.*)Array datatype .* not compatible",
-                    category=ValidationWarning,
-                )
-                result = self.prepare_output(step_input, open_as_type=datamodels.RampModel)
-        except ValidationWarning as err:
-            log.error(err)
-
-            # Inform the user and raise a clearer error message
-            msg = (
-                "Input data model does not have float-type data. "
-                "The file should be opened as a RampModel before calling the step."
-            )
-            log.error(msg)
-            raise TypeError(msg) from None
+        # Open the input data model as a RampModel
+        result = self.prepare_output(step_input, open_as_ramp=True)
 
         # Catch the cases to skip
         instrument = result.meta.instrument.name
@@ -101,17 +80,7 @@ class EmiCorrStep(Step):
             log.info("Correcting with reference file created on-the-fly.")
 
         else:
-            # Check for a deprecated parameter
-            if self.user_supplied_reffile is not None:
-                msg = (
-                    "The 'user_supplied_reffile' parameter is deprecated and will "
-                    "be removed in a future release. Use 'override_emicorr' instead."
-                )
-                warnings.warn(msg, DeprecationWarning, stacklevel=2)
-                log.warning(msg)
-                emicorr_ref_filename = self.user_supplied_reffile
-            else:
-                emicorr_ref_filename = self.get_reference_file(result, "emicorr")
+            emicorr_ref_filename = self.get_reference_file(result, "emicorr")
 
             # Skip the step if no reference file is found
             if emicorr_ref_filename == "N/A":

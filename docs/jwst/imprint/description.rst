@@ -1,8 +1,8 @@
 Description
 ===========
 
-:Class: `jwst.imprint.ImprintStep`
-:Alias: imprint
+:Class: `jwst.imprint.imprint_step.ImprintStep`
+:Alias: imprint_subtract
 
 The NIRSpec MSA imprint subtraction step removes patterns created in NIRSpec
 MOS and IFU exposures by the MSA structure. This is accomplished by
@@ -29,7 +29,7 @@ unaltered.
 When subtracting the imprint data model from the target data model,
 the SCI data array of the imprint exposure is subtracted from the SCI array
 of the target exposure, and the DQ arrays of the two exposures are combined using
-a bitwise logical OR operation. The error and variance arrays are not
+a bitwise OR operation. The error and variance arrays are not
 currently used or modified.
 
 Step Arguments

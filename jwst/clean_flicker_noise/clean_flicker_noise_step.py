@@ -3,6 +3,7 @@
 import logging
 
 from jwst.clean_flicker_noise import autoparam, clean_flicker_noise
+from jwst.lib.exposure_types import NIS_SOSS_SUPPORTED_SUBARRAYS
 from jwst.stpipe import Step
 
 __all__ = ["CleanFlickerNoiseStep"]
@@ -134,24 +135,16 @@ class CleanFlickerNoiseStep(Step):
         exp_type = output_model.meta.exposure.type
         pastasoss_filename = None
         if exp_type == "NIS_SOSS":
-            soss_subarrays = [
-                "SUBSTRIP256",
-                "SUB17STRIPE_SOSS",
-                "SUB60STRIPE_SOSS",
-                "SUB204STRIPE_SOSS",
-                "SUB680STRIPE_SOSS",
-                "SUBSTRIP96",
-            ]
             subarray = output_model.meta.subarray.name
             if (
-                output_model.meta.subarray.name not in soss_subarrays
+                output_model.meta.subarray.name not in NIS_SOSS_SUPPORTED_SUBARRAYS
                 and self.background_method == "median_image"
             ):
                 log.warning(
                     "Skipping: median_image processing is not available "
                     f"for SOSS subarray {subarray}."
                 )
-                output_model.meta.cal_step.clean_flicker_noise = "SKIPPED"
+                output_model.meta.cal_step.clean_flicker_noise = "FAILED"
                 return output_model
 
             pastasoss = self.get_reference_file(output_model, "pastasoss")
@@ -163,7 +156,7 @@ class CleanFlickerNoiseStep(Step):
                         "Skipping: median_image processing is not available "
                         "for SOSS without a pastasoss file."
                     )
-                    output_model.meta.cal_step.clean_flicker_noise = "SKIPPED"
+                    output_model.meta.cal_step.clean_flicker_noise = "FAILED"
                     return output_model
 
             else:

@@ -25,9 +25,8 @@ NON_STEPS = [
     "SystemCall",
 ]
 
+ALLOWED_STEP_STATUS = ("COMPLETE", "SKIPPED", "FAILED")
 NOT_SET = "NOT SET"
-COMPLETE = "COMPLETE"
-SKIPPED = "SKIPPED"
 
 __all__ = [
     "all_steps",
@@ -35,6 +34,7 @@ __all__ = [
     "folder_traverse",
     "record_step_status",
     "query_step_status",
+    "summary_step_status",
     "invariant_filename",
 ]
 
@@ -134,7 +134,7 @@ def folder_traverse(folder_path, basename_regex=".+", path_exclude_regex="^$"):
                 yield os.path.join(root, file)  # noqa: PTH118
 
 
-def record_step_status(datamodel, cal_step, success=True):
+def record_step_status(datamodel, cal_step, success=True, status=None):
     """
     Record whether or not a step completed in ``meta.cal_step``.
 
@@ -144,17 +144,22 @@ def record_step_status(datamodel, cal_step, success=True):
                 `~jwst.datamodels.container.ModelContainer`, \
                 `~jwst.datamodels.library.ModelLibrary`
         This is the datamodel or container of datamodels to modify in place
-
     cal_step : str
         The attribute in meta.cal_step for recording the status of the step
-
-    success : bool
-        If True, then 'COMPLETE' is recorded.  If False, then 'SKIPPED'
+    success : bool, optional
+        If True, set the status to "COMPLETE". If False, set "FAILED".
+        Ignored if ``status`` is not None.
+    status : {"COMPLETE", "SKIPPED", "FAILED"}, optional
+        The step status to record.
     """
-    if success:
-        status = COMPLETE
-    else:
-        status = SKIPPED
+    if status is None:
+        if success:
+            status = "COMPLETE"
+        else:
+            status = "FAILED"
+
+    if status not in ALLOWED_STEP_STATUS:
+        raise ValueError(f"Step status {status} not in allowed values: {ALLOWED_STEP_STATUS}")
 
     if isinstance(datamodel, Sequence):
         for model in datamodel:
@@ -166,8 +171,6 @@ def record_step_status(datamodel, cal_step, success=True):
                 datamodel.shelve(model)
     else:
         datamodel.meta.cal_step.instance[cal_step] = status
-
-    # TODO: standardize cal_step naming to point to the official step name
 
 
 def query_step_status(datamodel, cal_step):
@@ -184,14 +187,14 @@ def query_step_status(datamodel, cal_step):
                 `~jwst.datamodels.container.ModelContainer`, \
                 `~jwst.datamodels.library.ModelLibrary`
         The datamodel or container of datamodels to check
-
     cal_step : str
         The attribute in meta.cal_step to check
 
     Returns
     -------
-    status : str
-        The status of the step in ``meta.cal_step``, typically 'COMPLETE' or 'SKIPPED'
+    status : {"COMPLETE", "SKIPPED", "FAILED"}
+        The status of the step in ``meta.cal_step``.  If not set, "NOT SET"
+        will be returned.
 
     Notes
     -----
@@ -209,6 +212,34 @@ def query_step_status(datamodel, cal_step):
         return status
     else:
         return getattr(datamodel.meta.cal_step, cal_step, NOT_SET)
+
+
+def summary_step_status(status_values):
+    """
+    Get a summary status from a list of status values.
+
+    Used for recording a top-level status value in ``meta.cal_step`` for
+    a model that contains sub-models separately processed.
+
+    Parameters
+    ----------
+    status_values : list or tuple
+        All status values for the sub-models.
+
+    Returns
+    -------
+    str
+        "COMPLETE" if any model was successfully processed.  Otherwise,
+        "FAILED" if any model failed processing, or "SKIPPED" if no
+        processing was completed or failed.
+    """
+    if any(s == "COMPLETE" for s in status_values):
+        summary_status = "COMPLETE"
+    elif any(s == "FAILED" for s in status_values):
+        summary_status = "FAILED"
+    else:
+        summary_status = "SKIPPED"
+    return summary_status
 
 
 def invariant_filename(save_model_func):

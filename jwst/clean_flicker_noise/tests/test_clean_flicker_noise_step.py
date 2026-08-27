@@ -26,8 +26,9 @@ def test_output_type(skip):
     # Run call with skip option
     cleaned = CleanFlickerNoiseStep.call(input_model, skip=skip)
 
-    # output is a ramp model either way
+    # output is a ramp model either way: the process always runs, called standalone
     assert isinstance(cleaned, datamodels.RampModel)
+    assert cleaned.meta.cal_step.clean_flicker_noise == "COMPLETE"
 
     input_model.close()
     cleaned.close()
@@ -191,7 +192,7 @@ def test_autoparam_failed(caplog, monkeypatch):
     monkeypatch.setattr(autoparam, "niriss_image_parameters", lambda *args: None)
 
     input_model = make_niriss_rate_model()
-    CleanFlickerNoiseStep.call(input_model, autoparam=True, override_flat="N/A")
+    CleanFlickerNoiseStep.call(input_model, autoparam=True, apply_flat_field=False)
     assert "Auto parameter setting failed" in caplog.text
     assert "Using input parameters as provided" in caplog.text
     assert "apply_flat_field: True" not in caplog.text
@@ -257,7 +258,7 @@ def test_missing_pastasoss(caplog):
     assert "No PASTASOSS reference file" in caplog.text
     assert "median_image processing is not available" in caplog.text
     assert cleaned.meta.ref_file.pastasoss.name == "N/A"
-    assert cleaned.meta.cal_step.clean_flicker_noise == "SKIPPED"
+    assert cleaned.meta.cal_step.clean_flicker_noise == "FAILED"
     input_model.close()
     cleaned.close()
 
@@ -267,6 +268,6 @@ def test_soss_full_frame(caplog):
     input_model.meta.subarray.name = "FULL"
     cleaned = CleanFlickerNoiseStep.call(input_model, background_method="median_image")
     assert "median_image processing is not available for SOSS subarray FULL" in caplog.text
-    assert cleaned.meta.cal_step.clean_flicker_noise == "SKIPPED"
+    assert cleaned.meta.cal_step.clean_flicker_noise == "FAILED"
     input_model.close()
     cleaned.close()

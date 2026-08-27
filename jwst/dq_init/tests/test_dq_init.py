@@ -1,12 +1,19 @@
 import numpy as np
 import pytest
 from astropy.io import fits
-from stdatamodels.jwst.datamodels import GuiderRawModel, ImageModel, MaskModel, RampModel, dqflags
+from stdatamodels.jwst import datamodels
+from stdatamodels.jwst.datamodels import dqflags
 
-from jwst.dq_init import DQInitStep, dq_init_step
-from jwst.dq_init.dq_initialization import do_dqinit
-from jwst.dq_init.tests import helpers
-from jwst.refpix.refpix_step import collate_superstripes
+from jwst.dq_init import DQInitStep
+from jwst.dq_init.dq_initialization import check_dimensions, do_dqinit
+from jwst.dq_init.tests.helpers import make_dq_arrays, make_rampmodel
+from jwst.lib.stripe_utils import collate_superstripes
+from jwst.lib.tests.helpers import (
+    make_rawramp,
+    make_superstripe_mask_model,
+    make_superstripe_model,
+    one_stripe_mask,
+)
 
 # Set parameters for multiple runs of data
 args = "xstart, ystart, xsize, ysize, nints, ngroups, instrument, exp_type"
@@ -25,12 +32,10 @@ def test_dq_im_default(xstart, ystart, xsize, ysize, nints, ngroups, instrument,
     test that a flagged value in the reference file flags the PIXELDQ array"""
 
     # create raw input data for step
-    dm_ramp = helpers.make_rawramp(
-        instrument, nints, ngroups, ysize, xsize, ystart, xstart, exp_type
-    )
+    dm_ramp = make_rawramp(instrument, nints, ngroups, ysize, xsize, ystart, xstart, exp_type)
 
     # create a MaskModel for the dq input mask
-    dq, dq_def = helpers.make_maskmodel(ysize, xsize)
+    dq, dq_def = make_dq_arrays(ysize, xsize)
 
     # edit reference file with known bad pixel values
     dq[100, 100] = 2  # Dead pixel
@@ -45,7 +50,7 @@ def test_dq_im_default(xstart, ystart, xsize, ysize, nints, ngroups, instrument,
     dq[400, 200] = 17  # RC + do not use
 
     # write mask model
-    ref_data = MaskModel(dq=dq, dq_def=dq_def)
+    ref_data = datamodels.MaskModel(dq=dq, dq_def=dq_def)
     ref_data.meta.instrument.name = instrument
     ref_data.meta.subarray.xstart = xstart
     ref_data.meta.subarray.xsize = xsize
@@ -88,12 +93,10 @@ def test_dq_im_wrong_shape():
     instrument = "MIRI"
     exp_type = "MIR_IMAGE"
 
-    dm_ramp = helpers.make_rawramp(
-        instrument, nints, ngroups, ysize, xsize, ystart, xstart, exp_type
-    )
-    dq, dq_def = helpers.make_maskmodel(ysize, xsize)
+    dm_ramp = make_rawramp(instrument, nints, ngroups, ysize, xsize, ystart, xstart, exp_type)
+    dq, dq_def = make_dq_arrays(ysize, xsize)
 
-    ref_data = MaskModel(dq=dq, dq_def=dq_def)
+    ref_data = datamodels.MaskModel(dq=dq, dq_def=dq_def)
     ref_data.meta.instrument.name = instrument
     ref_data.meta.subarray.xstart = xstart
     ref_data.meta.subarray.xsize = xsize
@@ -117,13 +120,13 @@ def test_groupdq():
     ystart = 1
 
     # create raw input data for step
-    dm_ramp = helpers.make_rawramp(instrument, nints, ngroups, ysize, xsize, ystart, xstart)
+    dm_ramp = make_rawramp(instrument, nints, ngroups, ysize, xsize, ystart, xstart)
 
     # create a MaskModel for the dq input mask
-    dq, dq_def = helpers.make_maskmodel(ysize, xsize)
+    dq, dq_def = make_dq_arrays(ysize, xsize)
 
     # write mask model
-    ref_data = MaskModel(dq=dq, dq_def=dq_def)
+    ref_data = datamodels.MaskModel(dq=dq, dq_def=dq_def)
     ref_data.meta.instrument.name = instrument
     ref_data.meta.subarray.xstart = xstart
     ref_data.meta.subarray.xsize = xsize
@@ -162,7 +165,7 @@ def test_dq_subarray():
     groupdq = np.zeros(csize, dtype=int)
 
     # create a JWST datamodel for MIRI data
-    im = RampModel(data=data, pixeldq=pixeldq, groupdq=groupdq)
+    im = datamodels.RampModel(data=data, pixeldq=pixeldq, groupdq=groupdq)
 
     im.meta.instrument.name = "MIRI"
     im.meta.instrument.detector = "MIRIMAGE"
@@ -178,7 +181,7 @@ def test_dq_subarray():
     im.meta.subarray.ysize = ysize
 
     # create full size mask model
-    dq, dq_def = helpers.make_maskmodel(fullysize, fullxsize)
+    dq, dq_def = make_dq_arrays(fullysize, fullxsize)
 
     # place dq flags in dq array that would be in subarray
     # MASK1550 file has colstart=1, rowstart=467
@@ -187,7 +190,7 @@ def test_dq_subarray():
     dq[580, 80] = 4
 
     # write mask model
-    ref_data = MaskModel(dq=dq, dq_def=dq_def)
+    ref_data = datamodels.MaskModel(dq=dq, dq_def=dq_def)
     ref_data.meta.instrument.name = "MIRI"
     ref_data.meta.subarray.xstart = 1
     ref_data.meta.subarray.xsize = fullxsize
@@ -225,10 +228,10 @@ def test_dq_add1_groupdq():
     ysize = 1024
 
     # create raw input data for step
-    dm_ramp = helpers.make_rampmodel(nints, ngroups, ysize, xsize)
+    dm_ramp = make_rampmodel(nints, ngroups, ysize, xsize)
 
     # create a MaskModel for the dq input mask
-    dq, dq_def = helpers.make_maskmodel(ysize, xsize)
+    dq, dq_def = make_dq_arrays(ysize, xsize)
 
     # write reference file with known bad pixel values
 
@@ -236,7 +239,7 @@ def test_dq_add1_groupdq():
     dq[400, 500] = 3  # do_not_use and dead pixel
 
     # write mask model
-    ref_data = MaskModel(dq=dq, dq_def=dq_def)
+    ref_data = datamodels.MaskModel(dq=dq, dq_def=dq_def)
     ref_data.meta.instrument.name = "MIRI"
     ref_data.meta.subarray.xstart = 1
     ref_data.meta.subarray.xsize = xsize
@@ -270,9 +273,7 @@ def test_fullstep_default(
     """Test that the full step runs"""
 
     # create raw input data for step
-    dm_ramp = helpers.make_rawramp(
-        instrument, nints, ngroups, ysize, xsize, ystart, xstart, exp_type
-    )
+    dm_ramp = make_rawramp(instrument, nints, ngroups, ysize, xsize, ystart, xstart, exp_type)
 
     dm_ramp.meta.instrument.name = instrument
     dm_ramp.meta.instrument.detector = detector
@@ -284,8 +285,10 @@ def test_fullstep_default(
 
     # test that a pixeldq frame has been initialized
     if instrument == "FGS":
+        assert isinstance(outfile, datamodels.GuiderRawModel)
         assert outfile.dq.ndim == 2
     else:
+        assert isinstance(outfile, datamodels.RampModel)
         assert outfile.pixeldq.ndim == 2  # a 2-d pixeldq frame exists
 
 
@@ -304,9 +307,7 @@ def test_fullstep_userdq(tmp_path):
     detector = "MIRIMAGE"
 
     # create raw input data for step
-    dm_ramp = helpers.make_rawramp(
-        instrument, nints, ngroups, ysize, xsize, ystart, xstart, exp_type
-    )
+    dm_ramp = make_rawramp(instrument, nints, ngroups, ysize, xsize, ystart, xstart, exp_type)
 
     dm_ramp.meta.instrument.name = instrument
     dm_ramp.meta.instrument.detector = detector
@@ -314,10 +315,10 @@ def test_fullstep_userdq(tmp_path):
     dm_ramp.meta.observation.time = "00:00:00"
 
     # create a MaskModel for the dq input mask
-    dq, dq_def = helpers.make_maskmodel(ysize, xsize)
+    dq, dq_def = make_dq_arrays(ysize, xsize)
 
     # write mask model
-    ref_data = MaskModel(dq=dq, dq_def=dq_def)
+    ref_data = datamodels.MaskModel(dq=dq, dq_def=dq_def)
     ref_data.meta.instrument.name = instrument
     ref_data.meta.subarray.xstart = xstart
     ref_data.meta.subarray.xsize = xsize
@@ -345,7 +346,7 @@ def test_fullstep_userdq(tmp_path):
 
 def test_output_is_not_input():
     """Test that input data is not modified."""
-    dm_ramp = helpers.make_rampmodel()
+    dm_ramp = make_rampmodel()
     result = DQInitStep.call(dm_ramp)
     assert result is not dm_ramp
     assert result.meta.cal_step.dq_init == "COMPLETE"
@@ -353,71 +354,37 @@ def test_output_is_not_input():
 
 
 def test_missing_mask():
-    dm_ramp = helpers.make_rampmodel()
+    dm_ramp = make_rampmodel()
     result = DQInitStep.call(dm_ramp, override_mask="N/A")
     assert result is not dm_ramp
     assert result.meta.cal_step.dq_init == "SKIPPED"
     assert dm_ramp.meta.cal_step.dq_init is None
 
 
-def test_open_rampmodel_error(monkeypatch, caplog):
-    dm_ramp = helpers.make_rampmodel()
-
-    # Mock an error in opening the model as a RampModel
-    def mock_model(*args):
-        raise ValueError("Test error")
-
-    monkeypatch.setattr(dq_init_step.datamodels.RampModel, "__init__", mock_model)
-
-    result = DQInitStep.call(dm_ramp)
-
-    # No error raised, ramp is opened as a GuiderRawModel
-    assert "Input opened as GuiderRawModel" in caplog.text
-    assert isinstance(result, GuiderRawModel)
-
-
-def test_open_double_error(monkeypatch, caplog):
-    dm_ramp = helpers.make_rampmodel()
-
-    # Mock an error in opening the model as a RampModel
-    def mock_model(*args):
-        raise ValueError("Test error")
-
-    monkeypatch.setattr(dq_init_step.datamodels.RampModel, "__init__", mock_model)
-
-    # And also in opening the model as a GuiderRawModel
-    monkeypatch.setattr(dq_init_step.datamodels.GuiderRawModel, "__init__", mock_model)
-
-    # Exception is raised
-    with pytest.raises(ValueError, match="Test error"):
-        DQInitStep.call(dm_ramp)
-
-
-def test_open_unknown_error(monkeypatch, caplog):
+def test_open_bad_model(monkeypatch, caplog):
     # Make a model that is not a RampModel, so the step will attempt to convert it
-    dm_ramp = ImageModel()
+    dm_ramp = make_rampmodel()
+    raw_ramp = datamodels.Level1bModel(data=np.zeros(dm_ramp.data.shape, dtype=np.uint16))
+    raw_ramp.update(dm_ramp)
 
-    # Mock an unknown error in opening the model as a RampModel
-    def mock_model(*args):
-        raise RuntimeError("Test error")
-
-    monkeypatch.setattr(dq_init_step.datamodels.RampModel, "__init__", mock_model)
-
-    # Exception is raised
-    with pytest.raises(RuntimeError, match="Test error"):
-        DQInitStep.call(dm_ramp)
+    # Level1b can't be converted because of a data type mismatch
+    with pytest.raises(TypeError, match="is not compatible"):
+        DQInitStep.call(raw_ramp)
 
 
 def test_superstripe():
     # NIRISS SOSS model with 10 superstripes
-    model = helpers.make_superstripe_model()
+    model = make_superstripe_model()
     nstripe = model.meta.subarray.num_superstripe
 
     # full frame mask model with the same bad pixels in each stripe
-    mask = helpers.make_superstripe_mask_model()
+    mask = make_superstripe_mask_model()
 
     # run the step
     result = DQInitStep.call(model, override_mask=mask)
+
+    # result is a superstripe ramp
+    assert isinstance(result, datamodels.SuperstripeRampModel)
 
     # groupdq matches the data shape
     assert result.groupdq.shape == result.data.shape
@@ -427,7 +394,7 @@ def test_superstripe():
 
     # check that each stripe has the same pixels marked in pixeldq and
     # and DO_NOT_USE is also set in groupdq
-    expected = helpers.one_stripe_mask(result.data.shape[-2:])
+    expected = one_stripe_mask(result.data.shape[-2:])
     for i in range(result.data.shape[0]):
         for j in range(result.data.shape[1]):
             np.testing.assert_equal(result.groupdq[i, j], expected & dqflags.pixel["DO_NOT_USE"])
@@ -445,3 +412,97 @@ def test_superstripe():
     np.testing.assert_equal(reassembled.pixeldq[:, 4:-4], mask.dq[ystart:ystop, 4:-4])
     np.testing.assert_equal(reassembled.pixeldq[:, :4], dqflags.pixel["REFERENCE_PIXEL"])
     np.testing.assert_equal(reassembled.pixeldq[:, -4:], dqflags.pixel["REFERENCE_PIXEL"])
+
+
+def test_check_dimensions_good_input(caplog):
+    """
+    Test check_dimensions behavior with good input values.
+
+    The function should have no effect if DQ arrays are present and correctly shaped.
+    """
+    shape = (6, 3, 4, 5)
+    nint, ngroup, ny, nx = shape
+    nstripe = 3
+
+    model = datamodels.RampModel()
+    model.data = np.zeros(shape)
+    model.pixeldq = np.full((ny, nx), 1)
+    model.groupdq = np.full(shape, 1)
+    check_dimensions(model)
+    assert caplog.text == ""
+    assert model.pixeldq.shape == (ny, nx)
+    assert model.groupdq.shape == shape
+    np.testing.assert_equal(model.pixeldq, 1)
+    np.testing.assert_equal(model.groupdq, 1)
+
+    model = datamodels.SuperstripeRampModel()
+    model.meta.subarray.num_superstripe = nstripe
+    model.data = np.zeros(shape)
+    model.pixeldq = np.full((nstripe, ny, nx), 1)
+    model.groupdq = np.full(shape, 1)
+    check_dimensions(model)
+    assert caplog.text == ""
+    assert model.pixeldq.shape == (nstripe, ny, nx)
+    assert model.groupdq.shape == shape
+    np.testing.assert_equal(model.pixeldq, 1)
+    np.testing.assert_equal(model.groupdq, 1)
+
+    model = datamodels.GuiderRawModel()
+    model.data = np.zeros(shape)
+    model.dq = np.full((ny, nx), 1)
+    check_dimensions(model)
+    assert caplog.text == ""
+    assert model.dq.shape == (ny, nx)
+    np.testing.assert_equal(model.dq, 1)
+
+
+@pytest.mark.parametrize("bad_value", [None, 0, 1])
+def test_check_dimensions_bad_input(caplog, bad_value):
+    """
+    Test check_dimensions behavior with bad input values.
+
+    The function should set DQ arrays to default values if no DQ arrays
+    are present in the input model, or if they are present but have
+    incorrect shapes.
+    """
+    shape = (6, 3, 4, 5)
+    nint, ngroup, ny, nx = shape
+    nstripe = 3
+
+    model = datamodels.RampModel()
+    model.data = np.zeros(shape)
+    if bad_value is not None:
+        model.pixeldq = np.full((2, 2), bad_value)
+        model.groupdq = np.full((2, 2, 2, 2), bad_value)
+    check_dimensions(model)
+    assert "Setting input pixel DQ to default array" in caplog.text
+    assert "Setting input group DQ to default array" in caplog.text
+    assert model.pixeldq.shape == (ny, nx)
+    assert model.groupdq.shape == shape
+    np.testing.assert_equal(model.pixeldq, 0)
+    np.testing.assert_equal(model.groupdq, 0)
+    caplog.clear()
+
+    model = datamodels.SuperstripeRampModel()
+    model.meta.subarray.num_superstripe = nstripe
+    model.data = np.zeros(shape)
+    if bad_value is not None:
+        model.pixeldq = np.full((2, 2, 2), bad_value)
+        model.groupdq = np.full((2, 2, 2, 2), bad_value)
+    check_dimensions(model)
+    assert "Setting input pixel DQ to default array" in caplog.text
+    assert "Setting input group DQ to default array" in caplog.text
+    assert model.pixeldq.shape == (nstripe, ny, nx)
+    assert model.groupdq.shape == shape
+    np.testing.assert_equal(model.pixeldq, 0)
+    np.testing.assert_equal(model.groupdq, 0)
+    caplog.clear()
+
+    model = datamodels.GuiderRawModel()
+    model.data = np.zeros(shape)
+    if bad_value is not None:
+        model.dq = np.full((2, 2), bad_value)
+    check_dimensions(model)
+    assert "Setting input DQ to default array" in caplog.text
+    assert model.dq.shape == (ny, nx)
+    np.testing.assert_equal(model.dq, 0)

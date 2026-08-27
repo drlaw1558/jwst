@@ -1,3 +1,5 @@
+"""Subtract superbias reference data from the input science data model."""
+
 import logging
 
 from stdatamodels.jwst import datamodels
@@ -11,7 +13,7 @@ log = logging.getLogger(__name__)
 
 
 class SuperBiasStep(Step):
-    """Subtract super-bias reference data from the input science data model."""
+    """Subtract superbias reference data from the input science data model."""
 
     class_alias = "superbias"
 
@@ -35,7 +37,7 @@ class SuperBiasStep(Step):
             Superbias-corrected science data model.
         """
         # Open the input data model
-        result = self.prepare_output(step_input, open_as_type=datamodels.RampModel)
+        result = self.prepare_output(step_input, open_as_ramp=True)
 
         # Get the name of the superbias reference file to use
         bias_name = self.get_reference_file(result, "superbias")

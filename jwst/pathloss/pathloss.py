@@ -39,7 +39,7 @@ def get_center(exp_type, input_model, offsets=False):
     """
     Get the center of the target in the aperture.
 
-    (0.0, 0.0) is the aperture center.  Coordinates go
+    ``(0.0, 0.0)`` is the aperture center.  Coordinates go
     from -0.5 to 0.5.
 
     Parameters
@@ -47,12 +47,12 @@ def get_center(exp_type, input_model, offsets=False):
     exp_type : str
         Keyword value
 
-    input_model : data model object
+    input_model : `~stdatamodels.jwst.datamodels.JwstDataModel`
         Science data to be corrected
 
     offsets : bool
-        Only applies for MIRI LRS fixed-slit, if True the offsets
-        will be returned as well (imx, imy)
+        Only applies for MIRI LRS fixed-slit; if `True`, the offsets
+        will be returned as well in the form of ``(imx, imy)``
 
     Returns
     -------
@@ -62,10 +62,10 @@ def get_center(exp_type, input_model, offsets=False):
     ycenter : float
         Y-coordinate center of the target in the aperture
 
-    imx : float
+    imx : float, optional
         X-location relative to LRS aperture reference point
 
-    imy : float
+    imy : float, optional
         Y-location relative to LRS aperture reference point
     """
     if exp_type not in [
@@ -132,7 +132,7 @@ def get_center(exp_type, input_model, offsets=False):
 
 def shutter_above_is_closed(shutter_state):
     """
-    Return True if the shutter above the target shutter is closed.
+    Check if the shutter above the target shutter is closed.
 
     Parameters
     ----------
@@ -142,7 +142,7 @@ def shutter_above_is_closed(shutter_state):
     Returns
     -------
     result : bool
-        True if the shutter above the target shutter is closed.
+        `True` if the shutter above the target shutter is closed.
     """
     ref_loc = shutter_state.find("x")
     nshutters = len(shutter_state)
@@ -154,7 +154,7 @@ def shutter_above_is_closed(shutter_state):
 
 def shutter_below_is_closed(shutter_state):
     """
-    Return True if the shutter below the target shutter is closed.
+    Check if the shutter below the target shutter is closed.
 
     Parameters
     ----------
@@ -164,7 +164,7 @@ def shutter_below_is_closed(shutter_state):
     Returns
     -------
     result : bool
-        True if the shutter below the target shutter is closed.
+        `True` if the shutter below the target shutter is closed.
     """
     ref_loc = shutter_state.find("x")
     if ref_loc == 0 or shutter_state[ref_loc - 1] == "0":
@@ -177,12 +177,14 @@ def get_aperture_from_model(input_model, match):
     """
     Determine the correct aperture in the model to use.
 
-    Based on the value of the 'match' parameter.  For MSA, match is
-    the shutter state string, for fixed slit, match is the name of the slit.
+    Based on the value of the 'match' parameter:
+
+    * For MSA, match is the shutter state string.
+    * For fixed slit, match is the name of the slit.
 
     Parameters
     ----------
-    input_model : data model object
+    input_model : `~stdatamodels.jwst.datamodels.JwstDataModel`
         Science data to be corrected
 
     match : str
@@ -225,11 +227,11 @@ def calculate_pathloss_vector(pathloss_refdata, pathloss_wcs, xcenter, ycenter, 
 
     Parameters
     ----------
-    pathloss_refdata : numpy ndarray
+    pathloss_refdata : ndarray
         The input pathloss data array
 
-    pathloss_wcs : wcs
-        The pathloss datamodel's wcs attribute
+    pathloss_wcs : `~gwcs.wcs.WCS`
+        The pathloss datamodel's WCS attribute
 
     xcenter : float
         The x-center of the target (-0.5 to 0.5)
@@ -238,19 +240,19 @@ def calculate_pathloss_vector(pathloss_refdata, pathloss_wcs, xcenter, ycenter, 
         The y-center of the target (-0.5 to 0.5)
 
     calc_wave : bool
-        Calculate a wavelength vector from the ref file
+        Calculate a wavelength vector from the reference file
 
     Returns
     -------
-    wavelength : numpy ndarray
-        The 1-d wavelength array
+    wavelength : ndarray
+        The 1-D wavelength array
 
-    pathloss : numpy ndarray
-        The corresponding 1-d pathloss array
+    pathloss : ndarray
+        The corresponding 1-D pathloss array
 
     is_inside_slitlet : bool
-        Returns True if the object source position is inside the slitlet,
-        otherwise returns False
+        `True` if the object source position is inside the slitlet,
+        otherwise `False`
     """
     is_inside_slitlet = True
     if len(pathloss_refdata.shape) == 3:
@@ -326,20 +328,20 @@ def calculate_pathloss_vector(pathloss_refdata, pathloss_wcs, xcenter, ycenter, 
 
 def calculate_two_shutter_uniform_pathloss(pathloss_model):
     """
-    Calculate pathloss for uniform source, two shutter slit.
+    Calculate pathloss for uniform source, two-shutter slit.
 
-    The two shutter MOS case for uniform source calculation requires a custom
+    The two-shutter MOS case for uniform source calculation requires a custom
     routine since it uses both the 1X1 and 1X3 extensions of the pathloss reference file.
 
     Parameters
     ----------
-    pathloss_model : pathloss datamodel
+    pathloss_model : `~stdatamodels.jwst.datamodels.PathlossModel`
         The pathloss datamodel
 
     Returns
     -------
-    (wavelength, pathloss_vector) : tuple of 2 1-d numpy arrays
-        The wavelength and pathloss 1-d arrays
+    wavelength, pathloss_vector : ndarray
+        The wavelength and pathloss 1-D arrays, respectively
     """
     # This routine will run if the slit has exactly 2 shutters
     n_apertures = len(pathloss_model.apertures)
@@ -353,22 +355,24 @@ def calculate_two_shutter_uniform_pathloss(pathloss_model):
         elif aperture_name == "MOS1X3":
             aperture1x3 = aperture
         if aperture_name not in ["MOS1X1", "MOS1X3"]:
-            log.warning(f"Unexpected aperture name {aperture_name} (Expected 'MOS1X1' or 'MOS1X3')")
-            return (None, None)
+            log.warning(
+                f"Unexpected aperture name '{aperture_name}' (Expected 'MOS1X1' or 'MOS1X3')"
+            )
+            return None, None
     pathloss1x1 = aperture1x1.uniform_data
     pathloss1x3 = aperture1x3.uniform_data
     if len(pathloss1x1) != len(pathloss1x3):
         log.warning("Pathloss 1x1 and 1x3 arrays have different sizes")
-        return (None, None)
-    if aperture1x1.uniform_wcs.crval1 != aperture1x3.uniform_wcs.crval1:
-        log.warning("1x1 and 1x3 apertures have different WCS CRVAL1")
-        return (None, None)
-    if aperture1x1.uniform_wcs.crpix1 != aperture1x3.uniform_wcs.crpix1:
-        log.warning("1x1 and 1x3 apertures have different WCS CRPIX1")
-        return (None, None)
-    if aperture1x1.uniform_wcs.cdelt1 != aperture1x3.uniform_wcs.cdelt1:
-        log.warning("1x1 and 1x3 apertures have different WCS CDELT1")
-        return (None, None)
+        return None, None
+    if pathloss1x1.ndim != 1:
+        log.warning(f"Pathloss arrays have unexpected shape {pathloss1x1.shape} (Expected 1D)")
+        return None, None
+    wcs_key = ["crval1", "crpix1", "cdelt1"]
+    for key in wcs_key:
+        if getattr(aperture1x1.uniform_wcs, key) != getattr(aperture1x3.uniform_wcs, key):
+            log.warning("1x1 and 1x3 apertures have different WCS")
+            return None, None
+
     wavesize = len(pathloss1x1)
     wavelength = np.zeros(wavesize)
     crpix1 = aperture1x1.uniform_wcs.crpix1
@@ -378,7 +382,8 @@ def calculate_two_shutter_uniform_pathloss(pathloss_model):
         wavelength[i] = crval1 + (float(i + 1) - crpix1) * cdelt1
     average_pathloss = 0.5 * (pathloss1x1 + pathloss1x3)
     log.info("2 shutter slit: Uniform correction averages corrections for 1x1 and 1x3 apertures")
-    return (wavelength, average_pathloss)
+
+    return wavelength, average_pathloss
 
 
 def do_correction(
@@ -386,8 +391,8 @@ def do_correction(
     pathloss_model=None,
     inverse=False,
     source_type=None,
-    correction_pars=None,
     user_slit_loc=None,
+    return_corrections=True,
 ):
     """
     Execute all tasks for Path Loss Correction.
@@ -397,45 +402,38 @@ def do_correction(
     input_model : `~stdatamodels.jwst.datamodels.JwstDataModel`
         Science data to be corrected. Updated in place.
     pathloss_model : `~stdatamodels.jwst.datamodels.MirLrsPathlossModel`, \
-                     `~stdatamodels.jwst.datamodels.PathlossModel` or None, optional
+                     `~stdatamodels.jwst.datamodels.PathlossModel`, or None, optional
         Pathloss correction data
     inverse : bool, optional
         Invert the math operations used to apply the pathloss correction.
     source_type : str or None, optional
         Force processing using the specified source type.
-    correction_pars : dict or None, optional
-        Correction parameters to use instead of recalculation.
     user_slit_loc : float, optional
-        User-provided slit location in units of arcsec, where (0,0)
+        User-provided slit location in units of arcsec, where ``(0, 0)``
         is the center and the edges are +/-0.255 arcsec.
+    return_corrections : bool, optional
+        If `True`, a model containing the applied corrections is returned.
 
     Returns
     -------
-    input_model, corrections : tuple of `~stdatamodels.jwst.datamodels.JwstDataModel`
-        2-tuple of the corrected science data with pathloss extensions added, and a
-        model of the correction arrays.
+    input_model : `~stdatamodels.jwst.datamodels.JwstDataModel`
+        The corrected science data with pathloss extensions added.
+    corrections : `~stdatamodels.jwst.datamodels.JwstDataModel`, optional
+        A model of the correction arrays, returned if ``return_corrections``
+        is `True`.
     """
-    if not pathloss_model and not correction_pars:
-        raise RuntimeError(
-            "Neither a PathLossModel nor PathLossStep correction parameters given."
-            " One needs to be specified."
-        )
+    if not pathloss_model:
+        raise RuntimeError("A PathlossModel must be specified.")
     exp_type = input_model.meta.exposure.type
     log.info(f"Input exposure type is {exp_type}")
 
     corrections = None
     if exp_type == "NRS_MSASPEC":
-        corrections = do_correction_mos(
-            input_model, pathloss_model, inverse, source_type, correction_pars
-        )
+        corrections = do_correction_mos(input_model, pathloss_model, inverse, source_type)
     elif exp_type in ["NRS_FIXEDSLIT", "NRS_BRIGHTOBJ"]:
-        corrections = do_correction_fixedslit(
-            input_model, pathloss_model, inverse, source_type, correction_pars
-        )
+        corrections = do_correction_fixedslit(input_model, pathloss_model, inverse, source_type)
     elif exp_type == "NRS_IFU":
-        corrections = do_correction_ifu(
-            input_model, pathloss_model, inverse, source_type, correction_pars
-        )
+        corrections = do_correction_ifu(input_model, pathloss_model, inverse, source_type)
     elif exp_type in ["MIR_LRS-FIXEDSLIT", "MIR_WFSS"]:
         # only apply correction to LRS fixed-slit if target is point source
         if is_pointsource(input_model.meta.target.source_type):
@@ -444,10 +442,7 @@ def do_correction(
             log.warning("Not a point source; skipping correction for LRS.")
             input_model.meta.cal_step.pathloss = "SKIPPED"
     elif exp_type == "NIS_SOSS":
-        if correction_pars:
-            log.warning("Use of correction_pars with NIS_SOSS is not implemented. Skipping")
-            input_model.meta.cal_step.pathloss = "SKIPPED"
-        elif inverse:
+        if inverse:
             log.warning("Use of inversion with NIS_SOSS is not implemented. Skipping")
             input_model.meta.cal_step.pathloss = "SKIPPED"
         elif source_type is not None:
@@ -456,7 +451,10 @@ def do_correction(
         else:
             do_correction_soss(input_model, pathloss_model)
 
-    return input_model, corrections
+    if return_corrections:
+        return input_model, corrections
+    else:
+        return input_model
 
 
 def interpolate_onto_grid(wavelength_grid, wavelength_vector, pathloss_vector):
@@ -464,25 +462,25 @@ def interpolate_onto_grid(wavelength_grid, wavelength_vector, pathloss_vector):
     Interpolate pathloss value onto grid.
 
     Get the value of pathloss by interpolating each non-NaN element of
-    wavelength_grid into pathloss_vector using the index lookup of
-    wavelength_vector.  Pixels with wavelengths outside the range of the
+    ``wavelength_grid`` into ``pathloss_vector`` using the index lookup of
+    ``wavelength_vector``.  Pixels with wavelengths outside the range of the
     reference file should have a correction of NaN.
 
     Parameters
     ----------
-    wavelength_grid : numpy ndarray (2-d)
-        The grid of wavelengths for each science data pixel
+    wavelength_grid : ndarray
+        The 2-D grid of wavelengths for each science data pixel
 
-    wavelength_vector : numpy ndarray (1-d)
-        Vector of wavelengths
+    wavelength_vector : ndarray
+        The 1-D vector of wavelengths
 
-    pathloss_vector :  numpy ndarray (1-d)
-        Corresponding vector of pathloss values
+    pathloss_vector : ndarray
+        Corresponding 1-D vector of pathloss values
 
     Returns
     -------
-    pathloss_grid : numpy array
-        Grid of pathloss corrections for each non-Nan pixel
+    pathloss_grid : ndarray
+        Grid of pathloss corrections for each non-NaN pixel
     """
     # Need to set the pathloss correction of pixels whose wavelength is outside
     # the wavelength range of the reference file to NaN.  This trick will accomplish
@@ -531,7 +529,7 @@ def interpolate_onto_grid(wavelength_grid, wavelength_vector, pathloss_vector):
 
 def is_pointsource(srctype):
     """
-    Check whether srctype is a point source.
+    Check whether input is a point source.
 
     Parameters
     ----------
@@ -541,7 +539,7 @@ def is_pointsource(srctype):
     Returns
     -------
     result : bool
-        Returns True if srctype is "POINT"
+        `True` if ``srctype`` is "POINT"
     """
     if srctype is None:
         return False
@@ -551,7 +549,7 @@ def is_pointsource(srctype):
         return False
 
 
-def do_correction_mos(data, pathloss, inverse=False, source_type=None, correction_pars=None):
+def do_correction_mos(data, pathloss, inverse=False, source_type=None):
     """
     Path loss correction for NIRSpec MOS.
 
@@ -559,10 +557,10 @@ def do_correction_mos(data, pathloss, inverse=False, source_type=None, correctio
 
     Parameters
     ----------
-    data : jwst.datamodels.JwstDataModel
+    data : `~stdatamodels.jwst.datamodels.JwstDataModel`
         The NIRSpec MOS data to be corrected.
 
-    pathloss : jwst.datamodels.PathlossModel or None
+    pathloss : `~stdatamodels.jwst.datamodels.PathlossModel` or None
         The pathloss reference data.
 
     inverse : bool
@@ -571,25 +569,20 @@ def do_correction_mos(data, pathloss, inverse=False, source_type=None, correctio
     source_type : str or None
         Force processing using the specified source type.
 
-    correction_pars : jwst.datamodels.MultiSlitModel or None
-        The precomputed pathloss to apply instead of recalculation.
-
     Returns
     -------
-    corrections : jwst.datamodels.MultiSlitModel
+    corrections : `~stdatamodels.jwst.datamodels.MultiSlitModel`
         The pathloss corrections applied.
     """
     exp_type = data.meta.exposure.type
 
     # Loop over all MOS slitlets
     corrections = datamodels.MultiSlitModel()
+    correction_found = False
     for slit_number, slit in enumerate(data.slits):
         log.info(f"Working on slit {slit_number}")
 
-        if correction_pars:
-            correction = correction_pars.slits[slit_number]
-        else:
-            correction = _corrections_for_mos(slit, pathloss, exp_type, source_type)
+        correction = _corrections_for_mos(slit, pathloss, exp_type, source_type)
         corrections.slits.append(correction)
 
         # Apply the correction
@@ -597,6 +590,7 @@ def do_correction_mos(data, pathloss, inverse=False, source_type=None, correctio
             log.warning(f"No correction provided for slit {slit_number}. Skipping")
             continue
 
+        correction_found = True
         if not inverse:
             slit.data /= correction.data
             slit.err /= correction.data
@@ -619,12 +613,15 @@ def do_correction_mos(data, pathloss, inverse=False, source_type=None, correctio
         match_nans_and_flags(slit)
 
     # Set step status to complete
-    data.meta.cal_step.pathloss = "COMPLETE"
+    if correction_found:
+        data.meta.cal_step.pathloss = "COMPLETE"
+    else:
+        data.meta.cal_step.pathloss = "SKIPPED"
 
     return corrections
 
 
-def do_correction_fixedslit(data, pathloss, inverse=False, source_type=None, correction_pars=None):
+def do_correction_fixedslit(data, pathloss, inverse=False, source_type=None):
     """
     Path loss correction for NIRSpec fixed-slit modes.
 
@@ -632,10 +629,10 @@ def do_correction_fixedslit(data, pathloss, inverse=False, source_type=None, cor
 
     Parameters
     ----------
-    data : jwst.datamodels.JwstDataModel
+    data : `~stdatamodels.jwst.datamodels.JwstDataModel`
         The NIRSpec fixed-slit data to be corrected.
 
-    pathloss : jwst.datamodels.JwstDataModel
+    pathloss : `~stdatamodels.jwst.datamodels.JwstDataModel`
         The pathloss reference data.
 
     inverse : bool
@@ -644,25 +641,20 @@ def do_correction_fixedslit(data, pathloss, inverse=False, source_type=None, cor
     source_type : str or None
         Force processing using the specified source type.
 
-    correction_pars : jwst.datamodels.MultiSlitModel or None
-        The precomputed pathloss to apply instead of recalculation.
-
     Returns
     -------
-    corrections : jwst.datamodels.MultiSlitModel
+    corrections : `~stdatamodels.jwst.datamodels.MultiSlitModel`
         The pathloss corrections applied.
     """
     exp_type = data.meta.exposure.type
 
     # Loop over all slits contained in the input
     corrections = datamodels.MultiSlitModel()
+    correction_found = False
     for slit_number, slit in enumerate(data.slits):
         log.info(f"Working on slit {slit.name}")
 
-        if correction_pars:
-            correction = correction_pars.slits[slit_number]
-        else:
-            correction = _corrections_for_fixedslit(slit, pathloss, exp_type, source_type)
+        correction = _corrections_for_fixedslit(slit, pathloss, exp_type, source_type)
         corrections.slits.append(correction)
 
         # Apply the correction
@@ -670,6 +662,7 @@ def do_correction_fixedslit(data, pathloss, inverse=False, source_type=None, cor
             log.warning(f"No correction provided for slit {slit_number}. Skipping")
             continue
 
+        correction_found = True
         if not inverse:
             slit.data /= correction.data
             slit.err /= correction.data
@@ -697,12 +690,15 @@ def do_correction_fixedslit(data, pathloss, inverse=False, source_type=None, cor
         match_nans_and_flags(slit)
 
     # Set step status to complete
-    data.meta.cal_step.pathloss = "COMPLETE"
+    if correction_found:
+        data.meta.cal_step.pathloss = "COMPLETE"
+    else:
+        data.meta.cal_step.pathloss = "SKIPPED"
 
     return corrections
 
 
-def do_correction_ifu(data, pathloss, inverse=False, source_type=None, correction_pars=None):
+def do_correction_ifu(data, pathloss, inverse=False, source_type=None):
     """
     Path loss correction for NIRSpec IFU.
 
@@ -710,10 +706,10 @@ def do_correction_ifu(data, pathloss, inverse=False, source_type=None, correctio
 
     Parameters
     ----------
-    data : jwst.datamodels.JwstDataModel
+    data : `~stdatamodels.jwst.datamodels.JwstDataModel`
         The NIRSpec IFU data to be corrected.
 
-    pathloss : jwst.datamodels.JwstDataModel
+    pathloss : `~stdatamodels.jwst.datamodels.JwstDataModel`
         The pathloss reference data.
 
     inverse : bool
@@ -722,18 +718,16 @@ def do_correction_ifu(data, pathloss, inverse=False, source_type=None, correctio
     source_type : str or None
         Force processing using the specified source type.
 
-    correction_pars : jwst.datamodels.JwstDataModel or None
-        The precomputed pathloss to apply instead of recalculation.
-
     Returns
     -------
-    corrections : jwst.datamodels.JwstDataModel
+    corrections : `~stdatamodels.jwst.datamodels.JwstDataModel`
         The pathloss corrections applied.
     """
-    if correction_pars:
-        correction = correction_pars
-    else:
-        correction = _corrections_for_ifu(data, pathloss, source_type)
+    correction = _corrections_for_ifu(data, pathloss, source_type)
+
+    # For IFU, the pathloss correction type is not stored in the model.
+    # Just log it here.
+    log.info(f"Correction type used: {correction.pathloss_correction_type}")
 
     if not inverse:
         data.data /= correction.data
@@ -751,7 +745,6 @@ def do_correction_ifu(data, pathloss, inverse=False, source_type=None, correctio
             data.var_flat *= correction.data**2
     data.pathloss_point = correction.pathloss_point
     data.pathloss_uniform = correction.pathloss_uniform
-    data.pathloss_correction_type = correction.pathloss_correction_type
 
     # This might be useful to other steps
     data.wavelength = correction.wavelength
@@ -773,21 +766,17 @@ def do_correction_lrs(data, pathloss, user_slit_loc):
 
     Parameters
     ----------
-    data : jwst.datamodels.JwstDataModel
+    data : `~stdatamodels.jwst.datamodels.JwstDataModel`
         The MIRI LRS fixed-slit data to be corrected.
 
-    pathloss : jwst.datamodels.JwstDataModel
+    pathloss : `~stdatamodels.jwst.datamodels.JwstDataModel`
         The pathloss reference data.
 
     user_slit_loc : float
-        User-provided slit location in units of arcsec, where (0,0)
+        User-provided slit location in units of arcsec, where ``(0, 0)``
         is the center and the edges are +/-0.255 arcsec.
     """
     correction = _corrections_for_lrs(data, pathloss, user_slit_loc)
-
-    if not correction:
-        log.warning("No correction available; skipping step")
-        return
 
     # LRS correction is multiplicative
     data.data *= correction.data
@@ -819,16 +808,16 @@ def do_correction_soss(data, pathloss):
     subarray aperture.  The correction depends on the pupil wheel position
     and column number (or wavelength).  The simple option is to do the
     correction by column number, then the only interpolation needed is a
-    1-d interpolation into the pupil wheel position dimension.
+    1-D interpolation into the pupil wheel position dimension.
 
     Data are modified in-place.
 
     Parameters
     ----------
-    data : jwst.datamodels.JwstDataModel
+    data : `~stdatamodels.jwst.datamodels.JwstDataModel`
         The NIRISS SOSS data to be corrected.
 
-    pathloss : jwst.datamodels.JwstDataModel
+    pathloss : `~stdatamodels.jwst.datamodels.JwstDataModel`
         The pathloss reference data.
     """
     # Omit correction if this is a TSO observation
@@ -911,10 +900,10 @@ def _corrections_for_mos(slit, pathloss, exp_type, source_type=None):
 
     Parameters
     ----------
-    slit : jwst.datamodels.SlitModel
+    slit : `~stdatamodels.jwst.datamodels.SlitModel`
         The slit being operated on.
 
-    pathloss : jwst.datamodels.JwstDataModel
+    pathloss : `~stdatamodels.jwst.datamodels.JwstDataModel`
         The pathloss reference data
 
     exp_type : str
@@ -925,113 +914,113 @@ def _corrections_for_mos(slit, pathloss, exp_type, source_type=None):
 
     Returns
     -------
-    correction : jwst.datamodels.SlitModel
+    correction : `~stdatamodels.jwst.datamodels.SlitModel`
         The correction arrays
     """
     correction = None
     size = slit.data.size
 
     # Only work on slits with data.size > 0
-    if size > 0:
-        # Get centering
-        xcenter, ycenter = get_center(exp_type, slit)
-        # Calculate the 1-d wavelength and pathloss vectors
-        # for the source position
-        # Get the aperture from the reference file that matches the slit
-        slitlength = len(slit.shutter_state)
-        aperture = get_aperture_from_model(pathloss, slit.shutter_state)
-        log.info(f"Shutter state = {slit.shutter_state}, using {aperture.name} entry in ref file")
-        two_shutters = False
-        if slitlength == 2:
-            two_shutters = True
-        if shutter_below_is_closed(slit.shutter_state) and not shutter_above_is_closed(
-            slit.shutter_state
-        ):
-            ycenter = ycenter - 1.0
-            log.info("Shutter below fiducial is closed, using lower region of pathloss array")
-        if not shutter_below_is_closed(slit.shutter_state) and shutter_above_is_closed(
-            slit.shutter_state
-        ):
-            ycenter = ycenter + 1.0
-            log.info("Shutter above fiducial is closed, using upper region of pathloss array")
-        if aperture is not None:
-            (wavelength_pointsource, pathloss_pointsource_vector, is_inside_slitlet) = (
-                calculate_pathloss_vector(
-                    aperture.pointsource_data, aperture.pointsource_wcs, xcenter, ycenter
-                )
-            )
-            if two_shutters:
-                (wavelength_uniformsource, pathloss_uniform_vector) = (
-                    calculate_two_shutter_uniform_pathloss(pathloss)
-                )
-            else:
-                (wavelength_uniformsource, pathloss_uniform_vector, dummy) = (
-                    calculate_pathloss_vector(
-                        aperture.uniform_data, aperture.uniform_wcs, xcenter, ycenter
-                    )
-                )
-            # This should only happen if the 2 shutter uniform pathloss calculation has an error
-            if wavelength_uniformsource is None or pathloss_uniform_vector is None:
-                log.warning("Unable to calculate 2 shutter uniform pathloss.")
-                log.warning("Using 3 shutter aperture.")
-                (wavelength_uniformsource, pathloss_uniform_vector, dummy) = (
-                    calculate_pathloss_vector(
-                        aperture.uniform_data, aperture.uniform_wcs, xcenter, ycenter
-                    )
-                )
-            if is_inside_slitlet:
-                # Wavelengths in the reference file are in meters,
-                # need them to be in microns
-                wavelength_pointsource *= 1.0e6
-                wavelength_uniformsource *= 1.0e6
-
-                wavelength_array = slit.wavelength
-
-                # Compute the point source pathloss 2D correction
-                pathloss_2d_ps = interpolate_onto_grid(
-                    wavelength_array, wavelength_pointsource, pathloss_pointsource_vector
-                )
-
-                # Compute the uniform source pathloss 2D correction
-                pathloss_2d_un = interpolate_onto_grid(
-                    wavelength_array, wavelength_uniformsource, pathloss_uniform_vector
-                )
-
-                # Use the appropriate correction for this slit
-                if is_pointsource(source_type or slit.source_type):
-                    pathloss_2d = pathloss_2d_ps
-                    correction_type = "POINT"
-                else:
-                    pathloss_2d = pathloss_2d_un
-                    correction_type = "UNIFORM"
-
-                # Save the corrections. The `data` portion is the correction used.
-                # The individual ones will be saved in the respective attributes.
-                correction = datamodels.SlitModel(data=pathloss_2d)
-                correction.pathloss_point = pathloss_2d_ps
-                correction.pathloss_uniform = pathloss_2d_un
-                correction.pathloss_correction_type = correction_type
-
-            else:
-                log.warning("Source is outside slit.")
-        else:
-            log.warning(f"Cannot find matching pathloss model for slit with {slitlength} shutters")
-    else:
+    if size <= 0:
         log.warning(f"Slit has data size = {size}")
+        return correction
+
+    # Get centering
+    xcenter, ycenter = get_center(exp_type, slit)
+    # Calculate the 1-d wavelength and pathloss vectors
+    # for the source position
+    # Get the aperture from the reference file that matches the slit
+    slitlength = len(slit.shutter_state)
+
+    aperture = get_aperture_from_model(pathloss, slit.shutter_state)
+    if aperture is None:
+        log.warning(f"Cannot find matching pathloss model for slit with {slitlength} shutters")
+        return correction
+
+    log.info(f"Shutter state = {slit.shutter_state}, using {aperture.name} entry in ref file")
+    two_shutters = False
+    if slitlength == 2:
+        two_shutters = True
+    if shutter_below_is_closed(slit.shutter_state) and not shutter_above_is_closed(
+        slit.shutter_state
+    ):
+        ycenter = ycenter - 1.0
+        log.info("Shutter below fiducial is closed, using lower region of pathloss array")
+    if not shutter_below_is_closed(slit.shutter_state) and shutter_above_is_closed(
+        slit.shutter_state
+    ):
+        ycenter = ycenter + 1.0
+        log.info("Shutter above fiducial is closed, using upper region of pathloss array")
+
+    (wavelength_pointsource, pathloss_pointsource_vector, is_inside_slitlet) = (
+        calculate_pathloss_vector(
+            aperture.pointsource_data, aperture.pointsource_wcs, xcenter, ycenter
+        )
+    )
+    if two_shutters:
+        (wavelength_uniformsource, pathloss_uniform_vector) = (
+            calculate_two_shutter_uniform_pathloss(pathloss)
+        )
+    else:
+        (wavelength_uniformsource, pathloss_uniform_vector, _) = calculate_pathloss_vector(
+            aperture.uniform_data, aperture.uniform_wcs, xcenter, ycenter
+        )
+    # This should only happen if the 2 shutter uniform pathloss calculation has an error
+    if wavelength_uniformsource is None or pathloss_uniform_vector is None:
+        log.warning("Unable to calculate 2 shutter uniform pathloss.")
+        log.warning("Using 3 shutter aperture.")
+        (wavelength_uniformsource, pathloss_uniform_vector, _) = calculate_pathloss_vector(
+            aperture.uniform_data, aperture.uniform_wcs, xcenter, ycenter
+        )
+    if not is_inside_slitlet:
+        log.warning("Source is outside slit.")
+        return correction
+
+    # Wavelengths in the reference file are in meters,
+    # need them to be in microns
+    wavelength_pointsource *= 1.0e6
+    wavelength_uniformsource *= 1.0e6
+
+    wavelength_array = slit.wavelength
+
+    # Compute the point source pathloss 2D correction
+    pathloss_2d_ps = interpolate_onto_grid(
+        wavelength_array, wavelength_pointsource, pathloss_pointsource_vector
+    )
+
+    # Compute the uniform source pathloss 2D correction
+    pathloss_2d_un = interpolate_onto_grid(
+        wavelength_array, wavelength_uniformsource, pathloss_uniform_vector
+    )
+
+    # Use the appropriate correction for this slit
+    if is_pointsource(source_type or slit.source_type):
+        pathloss_2d = pathloss_2d_ps
+        correction_type = "POINT"
+    else:
+        pathloss_2d = pathloss_2d_un
+        correction_type = "UNIFORM"
+
+    # Save the corrections. The `data` portion is the correction used.
+    # The individual ones will be saved in the respective attributes.
+    correction = datamodels.SlitModel(data=pathloss_2d)
+    correction.pathloss_point = pathloss_2d_ps
+    correction.pathloss_uniform = pathloss_2d_un
+    correction.pathloss_correction_type = correction_type
 
     return correction
 
 
 def _corrections_for_fixedslit(slit, pathloss, exp_type, source_type):
     """
-    Calculate the correction arrays for Fixed-slit.
+    Calculate the correction arrays for fixed-slit.
 
     Parameters
     ----------
-    slit : jwst.datamodels.SlitModel
+    slit : `~stdatamodels.jwst.datamodels.SlitModel`
         The slit being operated on.
 
-    pathloss : jwst.datamodels.JwstDataModel
+    pathloss : `~stdatamodels.jwst.datamodels.JwstDataModel`
         The pathloss reference data
 
     exp_type : str
@@ -1042,7 +1031,7 @@ def _corrections_for_fixedslit(slit, pathloss, exp_type, source_type):
 
     Returns
     -------
-    correction : jwst.datamodels.SlitModel
+    correction : `~stdatamodels.jwst.datamodels.SlitModel`
         The correction arrays
     """
     correction = None
@@ -1054,71 +1043,71 @@ def _corrections_for_fixedslit(slit, pathloss, exp_type, source_type):
     # Get the aperture from the reference file that matches the slit
     aperture = get_aperture_from_model(pathloss, slit.name)
 
-    if aperture is not None:
-        log.info(f"Using aperture {aperture.name}")
-        (wavelength_pointsource, pathloss_pointsource_vector, is_inside_slit) = (
-            calculate_pathloss_vector(
-                aperture.pointsource_data, aperture.pointsource_wcs, xcenter, ycenter
-            )
-        )
-        (wavelength_uniformsource, pathloss_uniform_vector, dummy) = calculate_pathloss_vector(
-            aperture.uniform_data, aperture.uniform_wcs, xcenter, ycenter
-        )
-        if is_inside_slit:
-            # Wavelengths in the reference file are in meters,
-            # need them to be in microns
-            wavelength_pointsource *= 1.0e6
-            wavelength_uniformsource *= 1.0e6
-
-            # Use the appropriate correction for this slit
-            if is_pointsource(source_type or slit.source_type):
-                # calculate the point source corrected wavelengths and uncorrected wavelengths
-                # for the slit
-                wavelength_array_corr = get_wavelengths(slit, use_wavecorr=True)
-                wavelength_array_uncorr = get_wavelengths(slit, use_wavecorr=False)
-
-                # Compute the point source pathloss 2D correction
-                pathloss_2d_ps = interpolate_onto_grid(
-                    wavelength_array_corr, wavelength_pointsource, pathloss_pointsource_vector
-                )
-
-                # Compute the uniform source pathloss 2D correction
-                pathloss_2d_un = interpolate_onto_grid(
-                    wavelength_array_uncorr, wavelength_uniformsource, pathloss_uniform_vector
-                )
-
-                pathloss_2d = pathloss_2d_ps
-                correction_type = "POINT"
-            else:
-                wavelength_array = slit.wavelength
-
-                # Compute the point source pathloss 2D correction
-                pathloss_2d_ps = interpolate_onto_grid(
-                    wavelength_array, wavelength_pointsource, pathloss_pointsource_vector
-                )
-
-                # Compute the uniform source pathloss 2D correction
-                pathloss_2d_un = interpolate_onto_grid(
-                    wavelength_array, wavelength_uniformsource, pathloss_uniform_vector
-                )
-
-                pathloss_2d = pathloss_2d_un
-                correction_type = "UNIFORM"
-
-            # Save the corrections. The `data` portion is the correction used.
-            # The individual ones will be saved in the respective attributes.
-            correction = datamodels.SlitModel(data=pathloss_2d)
-            correction.pathloss_point = pathloss_2d_ps
-            correction.pathloss_uniform = pathloss_2d_un
-            correction.pathloss_correction_type = correction_type
-
-        else:
-            log.warning(
-                f"Source is outside slit. Skipping pathloss correction for slit {slit.name}"
-            )
-    else:
+    if aperture is None:
         log.warning(f"Cannot find matching pathloss model for {slit.name}")
         log.warning("Skipping pathloss correction for this slit")
+        return correction
+
+    log.info(f"Using aperture {aperture.name}")
+    (wavelength_pointsource, pathloss_pointsource_vector, is_inside_slit) = (
+        calculate_pathloss_vector(
+            aperture.pointsource_data, aperture.pointsource_wcs, xcenter, ycenter
+        )
+    )
+    (wavelength_uniformsource, pathloss_uniform_vector, _) = calculate_pathloss_vector(
+        aperture.uniform_data, aperture.uniform_wcs, xcenter, ycenter
+    )
+
+    if not is_inside_slit:
+        log.warning(f"Source is outside slit. Skipping pathloss correction for slit {slit.name}")
+        return correction
+
+    # Wavelengths in the reference file are in meters,
+    # need them to be in microns
+    wavelength_pointsource *= 1.0e6
+    wavelength_uniformsource *= 1.0e6
+
+    # Use the appropriate correction for this slit
+    if is_pointsource(source_type or slit.source_type):
+        # calculate the point source corrected wavelengths and uncorrected wavelengths
+        # for the slit
+        wavelength_array_corr = get_wavelengths(slit, use_wavecorr=True)
+        wavelength_array_uncorr = get_wavelengths(slit, use_wavecorr=False)
+
+        # Compute the point source pathloss 2D correction
+        pathloss_2d_ps = interpolate_onto_grid(
+            wavelength_array_corr, wavelength_pointsource, pathloss_pointsource_vector
+        )
+
+        # Compute the uniform source pathloss 2D correction
+        pathloss_2d_un = interpolate_onto_grid(
+            wavelength_array_uncorr, wavelength_uniformsource, pathloss_uniform_vector
+        )
+
+        pathloss_2d = pathloss_2d_ps
+        correction_type = "POINT"
+    else:
+        wavelength_array = slit.wavelength
+
+        # Compute the point source pathloss 2D correction
+        pathloss_2d_ps = interpolate_onto_grid(
+            wavelength_array, wavelength_pointsource, pathloss_pointsource_vector
+        )
+
+        # Compute the uniform source pathloss 2D correction
+        pathloss_2d_un = interpolate_onto_grid(
+            wavelength_array, wavelength_uniformsource, pathloss_uniform_vector
+        )
+
+        pathloss_2d = pathloss_2d_un
+        correction_type = "UNIFORM"
+
+    # Save the corrections. The `data` portion is the correction used.
+    # The individual ones will be saved in the respective attributes.
+    correction = datamodels.SlitModel(data=pathloss_2d)
+    correction.pathloss_point = pathloss_2d_ps
+    correction.pathloss_uniform = pathloss_2d_un
+    correction.pathloss_correction_type = correction_type
 
     return correction
 
@@ -1129,10 +1118,10 @@ def _corrections_for_ifu(data, pathloss, source_type):
 
     Parameters
     ----------
-    data : jwst.datamodels.SlitModel
+    data : `~stdatamodels.jwst.datamodels.SlitModel`
         The data being operated on.
 
-    pathloss : jwst.datamodels.JwstDataModel
+    pathloss : `~stdatamodels.jwst.datamodels.JwstDataModel`
         The pathloss reference data
 
     source_type : str or None
@@ -1140,7 +1129,7 @@ def _corrections_for_ifu(data, pathloss, source_type):
 
     Returns
     -------
-    correction : jwst.datamodels.SlitModel
+    correction : `~stdatamodels.jwst.datamodels.SlitModel`
         The correction arrays
     """
     # IFU targets are always inside slit
@@ -1149,10 +1138,10 @@ def _corrections_for_ifu(data, pathloss, source_type):
 
     # Calculate the 1-d wavelength and pathloss vectors for the source position
     aperture = pathloss.apertures[0]
-    (wavelength_pointsource, pathloss_pointsource_vector, dummy) = calculate_pathloss_vector(
+    (wavelength_pointsource, pathloss_pointsource_vector, _) = calculate_pathloss_vector(
         aperture.pointsource_data, aperture.pointsource_wcs, xcenter, ycenter
     )
-    (wavelength_uniformsource, pathloss_uniform_vector, dummy) = calculate_pathloss_vector(
+    (wavelength_uniformsource, pathloss_uniform_vector, _) = calculate_pathloss_vector(
         aperture.uniform_data, aperture.uniform_wcs, xcenter, ycenter
     )
     # Wavelengths in the reference file are in meters;
@@ -1208,25 +1197,24 @@ def _corrections_for_lrs(data, pathloss, user_slit_loc):
 
     Parameters
     ----------
-    data : jwst.datamodels.JwstDataModel
+    data : `~stdatamodels.jwst.datamodels.JwstDataModel`
         The LRS data being operated on.
 
-    pathloss : jwst.datamodels.MirLrsPathlossModel
+    pathloss : `~stdatamodels.jwst.datamodels.MirLrsPathlossModel`
         The pathloss reference data
 
     user_slit_loc : float
-        User-provided slit location in units of arcsec, where (0,0)
+        User-provided slit location in units of arcsec, where ``(0, 0)``
         is the center and the edges are +/-0.255 arcsec.
 
     Returns
     -------
-    correction : jwst.datamodels.JwstDataModel
+    correction : `~stdatamodels.jwst.datamodels.JwstDataModel`
         The correction arrays
     """
-    correction = None
-
     # Get location of target
     xcenter, ycenter, offset_1, offset_2 = get_center(data.meta.exposure.type, data, offsets=True)
+    log.info(f"Target location relative to aperture center = ({xcenter:.3f}, {ycenter:.3f})")
 
     # Get 1-d wavelength vector from reference file data
     wavelength_vector = pathloss.pathloss_table["wavelength"]
@@ -1240,7 +1228,8 @@ def _corrections_for_lrs(data, pathloss, user_slit_loc):
         )
 
     else:
-        log.info(f"Correction now using provided target center correction: {user_slit_loc}")
+        log.info(f"Correcting location from provided target center offset: {user_slit_loc} arcsec")
+
         # The slit is oriented with the long axis (the spatial
         # axis) horizontal, so the edges in the dispersion direction (the
         # narrow axis) would be negative down and positive up. Because the
@@ -1248,12 +1237,16 @@ def _corrections_for_lrs(data, pathloss, user_slit_loc):
         # +/-0.255 arcsec. Hence, the xcenter coordinate remains the same.
         ra, dec, wav = data.meta.wcs(offset_1, offset_2)
         location = (ra, dec, wav)
+
+        # Compute the spatial pixel scale from the WCS. Assume pixels are square.
         scale_degrees = compute_scale(
             data.meta.wcs, location, disp_axis=data.meta.wcsinfo.dispersion_direction
         )
         scale_arcsec = scale_degrees * 3600.0
+
         user_slit_loc_pix = user_slit_loc / scale_arcsec
         yusr_recenter = ycenter + user_slit_loc_pix
+        log.info(f"New target location = ({xcenter:.3f}, {yusr_recenter:.3f})")
         _, pathloss_vector, is_inside_slit = calculate_pathloss_vector(
             pathloss_data, pathloss_wcs, xcenter, yusr_recenter, calc_wave=False
         )

@@ -1,4 +1,4 @@
-#  Module for handling Reference Pixels
+"""Module for handling Reference Pixels."""
 #  Final CCWG Recommendation of 6/2013:
 #
 # The reference pixel correction for the NIR detectors should be done\
@@ -54,10 +54,11 @@ from jwst.refpix.optimized_convolution import apply_conv_kernel, make_kernels
 
 log = logging.getLogger(__name__)
 
-#
 # NIR Reference section dictionaries are zero indexed and specify the values
 # to be used in the following slice:
-# (rowstart: rowstop, colstart:colstop)
+#
+#     (rowstart: rowstop, colstart:colstop)
+#
 # The 'stop' values are one more than the actual final row or column, in
 # accordance with how Python slices work
 
@@ -138,9 +139,12 @@ MULTISTRIPE_AMPLIFIER_REGIONS = {
 #
 # MIR Reference section dictionaries are zero indexed and specify the values
 # to be used in the following slice:
-# name ('left' or 'right'): (rowstart, rowstop, column)
+#
+#     name ('left' or 'right'): (rowstart, rowstop, column)
+#
 # except the 'data' entry:
-# 'data': (rowstart, rowstop, colstart, colstop, stride)
+#
+#     'data': (rowstart, rowstop, colstart, colstop, stride)
 
 MIR_reference_sections = {
     "A": {
@@ -184,9 +188,7 @@ NIR_DETECTORS = [
 ]
 # fmt: on
 
-#
 # Status returns
-
 REFPIX_OK = 0
 BAD_REFERENCE_PIXELS = 1
 SUBARRAY_DOESNTFIT = 2
@@ -207,7 +209,34 @@ __all__ = [
 
 
 class Dataset:
-    """Base Class to handle passing data from routine to routine."""
+    """
+    Data container for passing data from routine to routine.
+
+    Parameters
+    ----------
+    input_model : `~stdatamodels.jwst.datamodels.JwstDataModel`
+        Science data model to be corrected
+    odd_even_columns : bool
+        Flag that controls whether odd and even-numbered columns are
+        processed separately (NIR only)
+    use_side_ref_pixels : bool
+        Flag that controls whether the side reference pixels are used in
+        the correction (NIR only)
+    side_smoothing_length : int
+        Smoothing length to use in calculating the running median of
+        the side reference pixels (NIR only)
+    side_gain : float
+        Gain to use in applying the side reference pixel correction
+        (NIR only)
+    conv_kernel_params : dict
+        Dictionary containing the parameters needed for the optimized convolution kernel
+        for Simple Improved Reference Subtraction (SIRS)
+    siglimit : float
+        Sigma clipping limit to use in calculating the mean of reference pixels.
+    odd_even_rows : bool
+        Flag that controls whether odd and even-numbered rows are handled
+        separately (MIR only)
+    """
 
     def __init__(
         self,
@@ -217,34 +246,9 @@ class Dataset:
         side_smoothing_length,
         side_gain,
         conv_kernel_params,
+        siglimit,
         odd_even_rows,
     ):
-        """
-        Construct a Dataset.
-
-        Parameters
-        ----------
-        input_model : DataModel
-            Science data model to be corrected
-        odd_even_columns : bool
-            Flag that controls whether odd and even-numbered columns are
-            processed separately (NIR only)
-        use_side_ref_pixels : bool
-            Flag that controls whether the side reference pixels are used in
-            the correction (NIR only)
-        side_smoothing_length : int
-            Smoothing length to use in calculating the running median of
-            the side reference pixels (NIR only)
-        side_gain : float
-            Gain to use in applying the side reference pixel correction
-            (NIR only)
-        conv_kernel_params : dict
-            Dictionary containing the parameters needed for the optimized convolution kernel
-            for Simple Improved Reference Subtraction (SIRS)
-        odd_even_rows : bool
-            Flag that controls whether odd and even-numbered rows are handled
-            separately (MIR only)
-        """
         self.refpix_algorithm = conv_kernel_params["refpix_algorithm"]
         self.sirs_kernel_model = conv_kernel_params["sirs_kernel_model"]
         self.sigreject = conv_kernel_params["sigreject"]
@@ -306,27 +310,33 @@ class Dataset:
         # Define temp array for processing every group
         self.pixeldq = self.get_pixeldq()
         self.group = None
+        self.siglimit = siglimit
 
-    def sigma_clip(self, data, dq, low=3.0, high=3.0):
+    def sigma_clip(self, data, dq, low=None, high=None):
         """
-        Wrap scipy.stats.sigmaclip so that data with zero variance is handled cleanly.
+        Wrap `scipy.stats.sigmaclip` so that data with zero variance is handled cleanly.
 
         Parameters
         ----------
-        data : NDArray
+        data : ndarray
             Array of pixels to be sigma-clipped
-        dq : NDArray
+        dq : ndarray
             DQ array for data
-        low : float, optional
-            Lower clipping boundary, in standard deviations from the mean (default=3.0)
-        high : float, optional
-            Upper clipping boundary, in standard deviations from the mean (default=3.0)
+        low : float or `None`, optional
+            Lower clipping boundary, in standard deviations from the mean
+        high : float or `None`, optional
+            Upper clipping boundary, in standard deviations from the mean
 
         Returns
         -------
         mean : float
             Clipped mean of data array
         """
+        if low is None:
+            low = self.siglimit
+        if high is None:
+            high = self.siglimit
+
         #
         # Only calculate the clipped mean for pixels that don't have the DO_NOT_USE
         # DQ bit set
@@ -351,7 +361,7 @@ class Dataset:
 
         Returns
         -------
-        pixeldq : NDArray
+        pixeldq : ndarray
             Numpy array for the pixeldq data with the full shape of the detector
         """
         if self.is_subarray and not self.is_multistripe:
@@ -533,12 +543,12 @@ class Dataset:
 
     def count_good_top_bottom_refpixels(self):
         """
-        Count the number of good top & bottom reference pixels.
+        Count the number of good top and bottom reference pixels.
 
         Returns
         -------
         ngood : int
-            Number of good top & bottom reference pixels
+            Number of good top and bottom reference pixels
         """
         donotuse = dqflags.pixel["DO_NOT_USE"]
         refdq = dqflags.pixel["REFERENCE_PIXEL"]
@@ -564,7 +574,36 @@ class Dataset:
 
 
 class NIRDataset(Dataset):
-    """Base class for all NIR detector datasets."""
+    """
+    Container for NIR detector datasets.
+
+    Parameters
+    ----------
+    input_model : `~stdatamodels.jwst.datamodels.JwstDataModel`
+        Science data model to be corrected.
+
+    odd_even_columns : bool
+        Flag that controls whether odd and even-numbered columns are
+        processed separately.
+
+    use_side_ref_pixels : bool
+        Flag that controls whether the side reference pixels are used in
+        the correction.
+
+    side_smoothing_length : int
+        Smoothing length to use in calculating the running median of
+        the side reference pixels.
+
+    side_gain : float
+        Gain to use in applying the side reference pixel correction.
+
+    conv_kernel_params : dict
+        Dictionary containing the parameters needed for the optimized convolution kernel.
+
+    siglimit : float
+        Sigma clipping limit, in standard deviations from the mean, to use in
+        sigma clipping for calculating the mean of reference pixels.
+    """
 
     def __init__(
         self,
@@ -574,33 +613,8 @@ class NIRDataset(Dataset):
         side_smoothing_length,
         side_gain,
         conv_kernel_params,
+        siglimit,
     ):
-        """
-        Construct the NIRDataset base class.
-
-        Parameters
-        ----------
-        input_model : DataModel
-            Science data model to be corrected
-
-        odd_even_columns : bool
-            Flag that controls whether odd and even-numbered columns are
-            processed separately
-
-        use_side_ref_pixels : bool
-            Flag that controls whether the side reference pixels are used in
-            the correction
-
-        side_smoothing_length : int
-            Smoothing length to use in calculating the running median of
-            the side reference pixels
-
-        side_gain : float
-            Gain to use in applying the side reference pixel correction
-
-        conv_kernel_params : dict
-            Dictionary containing the parameters needed for the optimized convolution kernel
-        """
         super(NIRDataset, self).__init__(
             input_model,
             odd_even_columns,
@@ -608,6 +622,7 @@ class NIRDataset(Dataset):
             side_smoothing_length,
             side_gain,
             conv_kernel_params,
+            siglimit,
             odd_even_rows=False,
         )
 
@@ -629,7 +644,7 @@ class NIRDataset(Dataset):
 
         Parameters
         ----------
-        input_model : DataModel
+        input_model : `~stdatamodels.jwst.datamodels.JwstDataModel`
             Input model containing data to mask.
         scipix_n_default : int, optional
             Number of regular samples before stepping out to collect
@@ -640,9 +655,9 @@ class NIRDataset(Dataset):
 
         Returns
         -------
-        odd_mask : NDArray
+        odd_mask : ndarray
             Boolean array matching data column size in detector orientation.
-            True identifies all odd pixels (science and reference).
+            `True` identifies all odd pixels (science and reference).
         """
         # Get data information from input model.
         # (y and x here refer to detector orientation, although input
@@ -731,7 +746,7 @@ class NIRDataset(Dataset):
 
         Parameters
         ----------
-        group : NDArray
+        group : ndarray
             The group that is being processed
 
         amplifier : {'A', 'B', 'C', 'D'}
@@ -743,10 +758,10 @@ class NIRDataset(Dataset):
 
         Returns
         -------
-        oddref : NDArray
+        oddref : ndarray
             Array containing all the odd reference pixels
 
-        odddq : NDArray
+        odddq : ndarray
             Array containing all the odd dq values for those reference pixels
         """
         rowstart, rowstop, colstart, colstop = self.reference_sections[amplifier][top_or_bottom]
@@ -775,7 +790,7 @@ class NIRDataset(Dataset):
 
         Parameters
         ----------
-        group : NDArray
+        group : ndarray
             The group that is being processed
         amplifier : {'A', 'B', 'C', 'D'}
             String corresponding to the amplifier being processed
@@ -785,9 +800,9 @@ class NIRDataset(Dataset):
 
         Returns
         -------
-        evenref : NDArray
+        evenref : ndarray
             Array containing all the even reference pixels
-        evendq : NDArray
+        evendq : ndarray
             Array containing all the even dq values for those reference pixels
         """
         rowstart, rowstop, colstart, colstop = self.reference_sections[amplifier][top_or_bottom]
@@ -811,7 +826,7 @@ class NIRDataset(Dataset):
 
         Parameters
         ----------
-        group : NDArray
+        group : ndarray
             Group that is being processed
         amplifier : {'A', 'B', 'C', 'D'}
             Amplifier that is being processed
@@ -834,7 +849,7 @@ class NIRDataset(Dataset):
 
         Parameters
         ----------
-        group : NDArray
+        group : ndarray
             Group that is being processed
         amplifier : {'A', 'B', 'C', 'D'}
             Amplifier that is being processed
@@ -857,7 +872,7 @@ class NIRDataset(Dataset):
 
         Parameters
         ----------
-        group : NDArray
+        group : ndarray
             Group that is being processed
         amplifier : {'A', 'B', 'C', 'D'}
             Amplifier that is being processed
@@ -868,13 +883,13 @@ class NIRDataset(Dataset):
         -------
         odd : float
             Value of the clipped mean of the reference pixels in odd-numbered
-            columns (if self.odd_even_columns)
+            columns (if ``self.odd_even_columns``)
         even : float
             Value of the clipped mean of the reference pixels in even-numbered
-            columns (if self.odd_even_columns)
+            columns (if ``self.odd_even_columns``)
         mean : float
             Value of the clipped mean of the reference pixels in both odd-numbered
-            and even-numbered columns (if not self.odd_even_columns)
+            and even-numbered columns (if not ``self.odd_even_columns``)
         """
         if self.odd_even_columns:
             odd = self.get_odd_refvalue(group, amplifier, top_or_bottom)
@@ -896,16 +911,16 @@ class NIRDataset(Dataset):
         Get the reference pixel values.
 
         Get values for each amplifier, odd and even columns
-        and top and bottom reference pixels
+        and top and bottom reference pixels.
 
         Parameters
         ----------
-        group : NDArray
-            Group that is being processed
+        group : ndarray
+            Group that is being processed.
 
         Returns
         -------
-        refpix : dictionary
+        refpix : dict
             Dictionary containing the clipped mean of the reference pixels for
             each amplifier, odd and even columns (if selected, otherwise all columns)
             and top and bottom.
@@ -930,8 +945,8 @@ class NIRDataset(Dataset):
 
         Parameters
         ----------
-        group : NDArray
-            Group that is being processed.  The parameter _group_ is corrected
+        group : ndarray
+            Group that is being processed.  The parameter ``group`` is corrected
             for the bias drift using the top and bottom reference pixels
         refvalues : dict
             Dictionary of reference pixel clipped means
@@ -949,6 +964,9 @@ class NIRDataset(Dataset):
                 # For now, just average the top and bottom corrections
                 oddrefsignal = self.average_with_none(oddreftop, oddrefbottom)
                 evenrefsignal = self.average_with_none(evenreftop, evenrefbottom)
+                log.debug(
+                    f"Amplifier: {amplifier}, Odd ref: {oddrefsignal}, Even ref: {evenrefsignal}"
+                )
                 if oddrefsignal is not None and evenrefsignal is not None:
                     if not self.is_irs2:
                         oddslice = (
@@ -989,7 +1007,7 @@ class NIRDataset(Dataset):
         """
         Average two numbers.
 
-        If one is None, return the other.  If both are None, return None
+        If one is None, return the other.  If both are None, return None.
 
         Parameters
         ----------
@@ -1019,25 +1037,25 @@ class NIRDataset(Dataset):
         """
         Make an array bigger by extending it at the top and bottom.
 
-        Extend by an amount equal to .5(smoothing length-1)
-        (as the smoothing length will be odd)
-        The extension is a reflection of the ends of the input array
+        Extend by an amount equal to .5 (smoothing length-1),
+        as the smoothing length will be odd.
+        The extension is a reflection of the ends of the input array.
 
         Parameters
         ----------
-        data : NDArray
-            Input data array
+        data : ndarray
+            Input data array.
         smoothing_length : int
             Smoothing length; should be odd, will be converted if not.
             Amount by which the input array is extended is
-            smoothing_length // 2 at the bottom and smoothing_length // 2 at
-            the top
+            ``smoothing_length // 2`` at the bottom and ``smoothing_length // 2`` at
+            the top.
 
         Returns
         -------
-        reflected : NDArray
+        reflected : ndarray
             Array that has been extended at the top and bottom by reflecting the
-            first and last few rows
+            first and last few rows.
         """
         nrows, ncols = data.shape
         if smoothing_length % 2 == 0:
@@ -1055,22 +1073,22 @@ class NIRDataset(Dataset):
         """
         Perform simple median filter.
 
-        Run a box of the same width as the data and height = smoothing_length.
-        Reflect the data at the top and bottom
+        Run a box of the same width as the data and ``height = smoothing_length``.
+        Reflect the data at the top and bottom.
 
         Parameters
         ----------
-        data : NDArray
-            Input 2-d science array
-        dq : NDArray
-            Input 2-d dq array
+        data : ndarray
+            Input 2-D science array.
+        dq : ndarray
+            Input 2-D DQ array.
         smoothing_length : int
             Height of box within which the median value is calculated.  Should be odd.
 
         Returns
         -------
-        result : NDArray
-            1-d array that is a median filtered version of the input data
+        result : ndarray
+            1-D array that is a median filtered version of the input data.
         """
         augmented_data = self.create_reflected(data, smoothing_length)
         augmented_dq = self.create_reflected(dq, smoothing_length)
@@ -1094,11 +1112,11 @@ class NIRDataset(Dataset):
         Calculate the reference pixel signal from the side reference pixels.
 
         Calculate by running a box up the side reference pixels and calculating
-        the running median
+        the running median.
 
         Parameters
         ----------
-        group : NDArray
+        group : ndarray
             Group that is being processed
         colstart : int
             Starting column
@@ -1107,7 +1125,7 @@ class NIRDataset(Dataset):
 
         Returns
         -------
-        NDArray
+        ndarray
             Median filtered version of the side reference pixels
         """
         smoothing_length = self.side_smoothing_length
@@ -1123,15 +1141,15 @@ class NIRDataset(Dataset):
 
         Parameters
         ----------
-        left : NDArray
-            1-d array of median-filtered reference pixel values from the left side
-        right : NDArray
-            1-d array of median-filtered reference pixel values from the right side
+        left : ndarray
+            1-D array of median-filtered reference pixel values from the left side
+        right : ndarray
+            1-D array of median-filtered reference pixel values from the right side
 
         Returns
         -------
-        sidegroup : NDArray
-            2-d array of average reference pixel vector replicated horizontally
+        sidegroup : ndarray
+            2-D array of average reference pixel vector replicated horizontally
         """
         combined = self.combine_with_nans(left, right)
         sidegroup = np.zeros((2048, 2048))
@@ -1141,13 +1159,13 @@ class NIRDataset(Dataset):
 
     def combine_with_nans(self, a, b):
         """
-        Combine 2 1-d arrays that have NaNs.
+        Combine 2 1-D arrays that have NaNs.
 
-        Wherever both arrays are NaN, output is 0.0.
-        Wherever a is NaN and b is not, return b.
-        Wherever b is NaN and a is not, return a.
-        Wherever neither a nor b is NaN, return the average of
-        a and b
+        * Wherever both arrays are NaN, output is 0.0.
+        * Wherever a is NaN and b is not, return b.
+        * Wherever b is NaN and a is not, return a.
+        * Wherever neither a nor b is NaN, return the average of
+          a and b.
 
         Parameters
         ----------
@@ -1183,14 +1201,14 @@ class NIRDataset(Dataset):
 
         Parameters
         ----------
-        group : NDArray
+        group : ndarray
             Group being processed
-        sidegroup : NDArray
+        sidegroup : ndarray
             Side reference pixel signal replicated horizontally
 
         Returns
         -------
-        corrected_group : NDArray
+        corrected_group : ndarray
             The group corrected for the side reference pixel signal
         """
         corrected_group = group - self.side_gain * sidegroup
@@ -1202,12 +1220,12 @@ class NIRDataset(Dataset):
 
         Parameters
         ----------
-        group : NDArray
+        group : ndarray
             Group being processed
 
         Returns
         -------
-        corrected_group : NDArray
+        corrected_group : ndarray
             Corrected group
         """
         continue_apply_conv_kernel = False
@@ -1253,7 +1271,7 @@ class NIRDataset(Dataset):
         Do Reference Pixels Corrections for full frame data.
 
         Correct all amplifiers, NIR detectors.  The first read of each integration
-        is NOT subtracted, as the signal is removed in the superbias subtraction step
+        is NOT subtracted, as the signal is removed in the superbias subtraction step.
         """
         #
         #  First transform pixeldq array to detector coordinates
@@ -1268,6 +1286,7 @@ class NIRDataset(Dataset):
                 self.dms_to_detector(integration, group)
                 thisgroup = self.group
                 refvalues = self.get_refvalues(thisgroup)
+                log.debug(f"Integration: {integration}, Group: {group}")
                 self.do_top_bottom_correction(thisgroup, refvalues)
                 if self.use_side_ref_pixels:
                     corrected_group = self.do_side_correction(thisgroup)
@@ -1284,7 +1303,7 @@ class NIRDataset(Dataset):
         Do corrections for subarrays.
 
         Reference pixel values are calculated separately for odd and even columns
-        if odd_even_columns is True, otherwise a single number calculated from
+        if ``odd_even_columns`` is `True`, otherwise a single number calculated from
         all reference pixels
         """
         refdq = dqflags.pixel["REFERENCE_PIXEL"]
@@ -1345,14 +1364,14 @@ class NIRDataset(Dataset):
         """
         Collect refpix values for each amplifier.
 
-        If odd_even_columns, additionally separate
+        If ``odd_even_columns``, additionally separate
         each amplifier reference value by odd and
         even column. All values returned are sigma-
         clipped.
 
         Parameters
         ----------
-        group : np.array[float]
+        group : ndarray[float]
             The current group to be corrected.
         stripe_idx : int
             The stripe index for superstripe observations. For substripe,
@@ -1419,7 +1438,7 @@ class NIRDataset(Dataset):
 
         Parameters
         ----------
-        group : np.array[float]
+        group : ndarray[float]
             The current group being corrected.
         refvalues : dict
             The dictionary of reference pixel
@@ -1429,7 +1448,7 @@ class NIRDataset(Dataset):
 
         Returns
         -------
-        np.array[float]
+        ndarray[float]
             The group with the reference pixel
             signal removed.
         """
@@ -1527,29 +1546,30 @@ class NIRDataset(Dataset):
         self.restore_group(integration, group)
 
     def dms_to_detector_dq(self):
-        """Convert dq data from DMS to detector frame."""
+        """Convert DQ data from DMS to detector frame."""
         self.pixeldq = reffile_utils.science_detector_frame_transform(
             self.pixeldq, self.fastaxis, self.slowaxis
         )
 
 
 class MIRIDataset(Dataset):
-    """Dataset for MIRI data."""
+    """
+    Container for MIRI data.
 
-    def __init__(self, input_model, odd_even_rows, conv_kernel_params):
-        """
-        Create a MIRI dataset.
+    Parameters
+    ----------
+    input_model : `~stdatamodels.jwst.datamodels.JwstDataModel`
+        Science data model to be corrected
+    odd_even_rows : bool
+        Flag that controls whether odd and even-numbered rows are
+        handled separately
+    conv_kernel_params : dict
+        Dictionary containing the parameters needed for the optimized convolution kernel
+    siglimit : float
+        Sigma clipping limit for outlier rejection
+    """
 
-        Parameters
-        ----------
-        input_model : DataModel
-            Science data model to be corrected
-        odd_even_rows : bool
-            Flag that controls whether odd and even-numbered rows are
-            handled separately
-        conv_kernel_params : dict
-            Dictionary containing the parameters needed for the optimized convolution kernel
-        """
+    def __init__(self, input_model, odd_even_rows, conv_kernel_params, siglimit):
         super(MIRIDataset, self).__init__(
             input_model,
             odd_even_columns=False,
@@ -1558,6 +1578,7 @@ class MIRIDataset(Dataset):
             side_gain=False,
             conv_kernel_params=conv_kernel_params,
             odd_even_rows=odd_even_rows,
+            siglimit=siglimit,
         )
 
         self.reference_sections = MIR_reference_sections
@@ -1596,7 +1617,7 @@ class MIRIDataset(Dataset):
 
         Parameters
         ----------
-        group : NDArray
+        group : ndarray
             Group being processed
         amplifier : {'A', 'B', 'C', 'D'}
             Amplifier being processed
@@ -1605,9 +1626,9 @@ class MIRIDataset(Dataset):
 
         Returns
         -------
-        oddref : NDArray
+        oddref : ndarray
             Reference pixels from odd-numbered rows
-        odddq : NDArray
+        odddq : ndarray
             DQ values for reference pixels from odd-numbered rows
         """
         rowstart, rowstop, column = self.reference_sections[amplifier][left_or_right]
@@ -1621,7 +1642,7 @@ class MIRIDataset(Dataset):
 
         Parameters
         ----------
-        group : NDArray
+        group : ndarray
             Group being processed
         amplifier : {'A', 'B', 'C', 'D'}
             Amplifier being processed
@@ -1630,9 +1651,9 @@ class MIRIDataset(Dataset):
 
         Returns
         -------
-        evenref : NDArray
+        evenref : ndarray
             Reference pixels from even-numbered rows
-        evendq : NDArray
+        evendq : ndarray
             DQ values for reference pixels from even-numbered rows
         """
         rowstart, rowstop, column = self.reference_sections[amplifier][left_or_right]
@@ -1647,7 +1668,7 @@ class MIRIDataset(Dataset):
 
         Parameters
         ----------
-        group : NDArray
+        group : ndarray
             Group that is being processed
         amplifier : {'A', 'B', 'C', 'D'}
             Amplifier that is being processed
@@ -1670,7 +1691,7 @@ class MIRIDataset(Dataset):
 
         Parameters
         ----------
-        group : NDArray
+        group : ndarray
             Group that is being processed
         amplifier : {'A', 'B', 'C', 'D'}
             Amplifier that is being processed
@@ -1693,7 +1714,7 @@ class MIRIDataset(Dataset):
 
         Parameters
         ----------
-        group : NDArray
+        group : ndarray
             Group that is being processed
         amplifier : {'A', 'B', 'C', 'D'}
             Amplifier that is being processed
@@ -1704,13 +1725,13 @@ class MIRIDataset(Dataset):
         -------
         odd : float
             Value of the clipped mean of the reference pixels in odd-numbered
-            rows (if self.odd_even_rows)
+            rows (if ``self.odd_even_rows``)
         even : float
             Value of the clipped mean of the reference pixels in even-numbered
-            rows (if self.odd_even_rows)
+            rows (if ``self.odd_even_rows``)
         mean : float
             Value of the clipped mean of the reference pixels in both odd-numbered
-            and even-numbered rows (if not self.odd_even_rows)
+            and even-numbered rows (if not ``self.odd_even_rows``)
         """
         if self.odd_even_rows:
             odd = self.get_odd_refvalue(group, amplifier, left_or_right)
@@ -1740,7 +1761,7 @@ class MIRIDataset(Dataset):
 
         Parameters
         ----------
-        group : NDArray
+        group : ndarray
             Group that is being processed.
 
         Returns
@@ -1770,7 +1791,7 @@ class MIRIDataset(Dataset):
 
         Parameters
         ----------
-        group : NDArray
+        group : ndarray
             Group that is being processed.  This parameter is corrected for the
             bias drift using the left and right reference pixels
         refvalues : dict
@@ -1864,13 +1885,14 @@ def create_dataset(
     side_gain,
     odd_even_rows,
     conv_kernel_params,
+    siglimit,
 ):
     """
     Create a dataset object from an input model.
 
     Parameters
     ----------
-    input_model : DataModel
+    input_model : `~stdatamodels.jwst.datamodels.JwstDataModel`
         Science data model to be corrected
     odd_even_columns : bool
         Flag that controls whether odd and even-numbered columns are
@@ -1889,15 +1911,17 @@ def create_dataset(
         separately (MIR only)
     conv_kernel_params : dict
         Dictionary containing the parameters needed for the optimized convolution kernel
+    siglimit : float
+        Sigma clipping limit for outlier rejection
 
     Returns
     -------
-    dataset_subclass : Dataset
+    dataset_subclass : `Dataset`
         The appropriate subclass of the dataset class
     """
     detector = input_model.meta.instrument.detector
-
-    if reffile_utils.is_subarray(input_model):
+    is_multistripe = getattr(input_model.meta.subarray, "multistripe_reads1", None) is not None
+    if reffile_utils.is_subarray(input_model) and not is_multistripe:
         colstart = input_model.meta.subarray.xstart - 1
         colstop = colstart + input_model.meta.subarray.xsize
         rowstart = input_model.meta.subarray.ystart - 1
@@ -1906,7 +1930,7 @@ def create_dataset(
             return None
 
     if detector[:3] == "MIR":
-        return MIRIDataset(input_model, odd_even_rows, conv_kernel_params)
+        return MIRIDataset(input_model, odd_even_rows, conv_kernel_params, siglimit)
     elif detector in NIR_DETECTORS:
         return NIRDataset(
             input_model,
@@ -1915,6 +1939,7 @@ def create_dataset(
             side_smoothing_length,
             side_gain,
             conv_kernel_params,
+            siglimit,
         )
     else:
         log.error("Unrecognized detector")
@@ -1925,6 +1950,7 @@ def create_dataset(
             side_smoothing_length,
             side_gain,
             conv_kernel_params,
+            siglimit,
         )
 
 
@@ -1936,13 +1962,14 @@ def correct_model(
     side_gain,
     odd_even_rows,
     conv_kernel_params,
+    siglimit,
 ):
     """
     Perform Reference Pixel Correction on a JWST Model.
 
     Parameters
     ----------
-    input_model : DataModel
+    input_model : `~stdatamodels.jwst.datamodels.JwstDataModel`
         Model to be corrected
     odd_even_columns : bool
         Flag that controls whether odd and even-numbered columns are
@@ -1961,6 +1988,8 @@ def correct_model(
         separately (MIR only)
     conv_kernel_params : dict
         Dictionary containing the parameters needed for the optimized convolution kernel
+    siglimit : float
+        Sigma clipping limit for outlier rejection
 
     Returns
     -------
@@ -1980,6 +2009,7 @@ def correct_model(
         side_gain,
         odd_even_rows,
         conv_kernel_params,
+        siglimit,
     )
 
     if input_dataset is None:
@@ -1997,12 +2027,12 @@ def reference_pixel_correction(input_dataset):
 
     Parameters
     ----------
-    input_dataset : Dataset
+    input_dataset : `Dataset`
         Dataset to be corrected
 
     Returns
     -------
-    input_dataset : Dataset
+    input_dataset : `Dataset`
         Corrected dataset
     """
     input_dataset.do_corrections()
@@ -2020,12 +2050,12 @@ def process_zeroframe_correction(input_dataset):
 
     Parameters
     ----------
-    input_dataset : Dataset
+    input_dataset : `Dataset`
         Dataset to be corrected
 
     Returns
     -------
-    input_dataset : Dataset
+    input_dataset : `Dataset`
         Corrected dataset
     """
     # Setup input model for ZEROFRAME
@@ -2047,12 +2077,12 @@ def restore_input_model(input_dataset, saved_values):
 
     Parameters
     ----------
-    input_dataset : Dataset
-        Dataset to be corrected
+    input_dataset : `Dataset`
+        Dataset to be corrected.
 
     saved_values : tuple
         A tuple of saved values to be used to setup the final
-        corrected RampModel.
+        corrected `~stdatamodels.jwst.datamodels.RampModel`.
     """
     data, gdq, pdq, wh_zero = saved_values
 
@@ -2080,11 +2110,11 @@ def setup_dataset_for_zeroframe(input_dataset, saved_values):
 
     Parameters
     ----------
-    input_dataset : Dataset
-        Dataset to be modified
+    input_dataset : `Dataset`
+        Dataset to be modified.
     saved_values : tuple
         A tuple of saved values used to setup the final
-        corrected RampModel.
+        corrected `~stdatamodels.jwst.datamodels.RampModel`.
     """
     # Setup dimensions
     dims = input_dataset.input_model.zeroframe.shape
@@ -2117,8 +2147,8 @@ def save_science_values(input_dataset):
 
     Parameters
     ----------
-    input_dataset : Dataset
-        Dataset to be corrected
+    input_dataset : `Dataset`
+        Dataset to be corrected.
 
     Returns
     -------

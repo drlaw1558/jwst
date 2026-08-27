@@ -1,3 +1,5 @@
+"""Extract 1-D spectra from JWST spectroscopic data."""
+
 import logging
 
 import crds
@@ -8,6 +10,7 @@ from jwst.datamodels.utils.wfss_multispec import make_wfss_multiexposure
 from jwst.extract_1d import extract
 from jwst.extract_1d.ifu import ifu_extract1d
 from jwst.extract_1d.soss_extract import soss_extract
+from jwst.lib.exposure_types import NIS_SOSS_SUPPORTED_SUBARRAYS
 from jwst.stpipe import Step
 
 __all__ = ["Extract1dStep"]
@@ -68,7 +71,7 @@ class Extract1dStep(Step):
 
         Parameters
         ----------
-        model : DataModel
+        model : `~stdatamodels.jwst.datamodels.JwstDataModel`
             The input model.
         exp_type : str
             Exposure type.
@@ -114,12 +117,12 @@ class Extract1dStep(Step):
 
         Parameters
         ----------
-        model : DataModel
+        model : `~stdatamodels.jwst.datamodels.JwstDataModel`
             Input model.
 
         Returns
         -------
-        DataModel
+        `~stdatamodels.jwst.datamodels.JwstDataModel`
             The output spectra.
         """
         # Set the filter configuration
@@ -136,23 +139,19 @@ class Extract1dStep(Step):
             return model
 
         # Set the subarray mode being processed
-        if model.meta.subarray.name in [
-            "SUBSTRIP256",
-            "SUB17STRIPE_SOSS",
-            "SUB60STRIPE_SOSS",
-            "SUB204STRIPE_SOSS",
-            "SUB680STRIPE_SOSS",
-        ]:
-            log.info("Exposure is in the SUBSTRIP256 subarray.")
-            log.info("Traces 1 and 2 will be modelled and decontaminated before extraction.")
-            subarray = "SUBSTRIP256"
-        elif model.meta.subarray.name == "SUBSTRIP96":
+        if model.meta.subarray.name == "SUBSTRIP96":
             log.info("Exposure is in the SUBSTRIP96 subarray.")
             log.info(
                 "Traces of orders 1 and 2 will be modelled but only order 1 "
                 "will be decontaminated before extraction."
             )
             subarray = "SUBSTRIP96"
+        elif model.meta.subarray.name in NIS_SOSS_SUPPORTED_SUBARRAYS:
+            # Remaining arrays other than SUBSTRIP96 are either SUBSTRIP256
+            # or a superstripe subarray that reassembles to SUBSTRIP256
+            log.info("Exposure is in the SUBSTRIP256 subarray.")
+            log.info("Traces 1 and 2 will be modelled and decontaminated before extraction.")
+            subarray = "SUBSTRIP256"
         else:
             log.error(
                 "The SOSS extraction is implemented for the SUBSTRIP256 "
@@ -224,7 +223,7 @@ class Extract1dStep(Step):
 
         Parameters
         ----------
-        model : DataModel
+        model : `~stdatamodels.jwst.datamodels.JwstDataModel`
             Input model.
 
         Returns
@@ -254,7 +253,7 @@ class Extract1dStep(Step):
 
         Parameters
         ----------
-        model : DataModel
+        model : `~stdatamodels.jwst.datamodels.JwstDataModel`
             Input model.
         exp_type : str
             Exposure type.
@@ -265,7 +264,7 @@ class Extract1dStep(Step):
 
         Returns
         -------
-        DataModel
+        `~stdatamodels.jwst.datamodels.JwstDataModel`
             The output spectra.
         """
         source_type = model.meta.target.source_type
@@ -309,7 +308,7 @@ class Extract1dStep(Step):
 
         Parameters
         ----------
-        intermediate_model : DataModel
+        intermediate_model : `~stdatamodels.jwst.datamodels.JwstDataModel`
             A model to save
         suffix : str
             Suffix to append to the output filename.
@@ -476,6 +475,17 @@ class Extract1dStep(Step):
         # For WFSS, reorder the x1d product to save it in the flat format
         if exp_type in extract.WFSS_EXPTYPES:
             result = make_wfss_multiexposure(result)
+            if "WFSS" in exp_type:
+                # WCS needs to be added to x1d files so that the S_REGION can be
+                # computed in the spec3 pipeline for combined x1d and c1d products
+                if isinstance(input_data, SourceModelContainer) and isinstance(
+                    input_data[0], datamodels.SlitModel
+                ):
+                    result.meta.wcs = input_data[0].meta.wcs
+                    result.spec[0].s_region = input_data[0].meta.wcsinfo.s_region
+                else:
+                    result.meta.wcs = input_data.slits[0].meta.wcs
+                    result.spec[0].s_region = input_data.slits[0].meta.wcsinfo.s_region
             result.meta.cal_step.extract_1d = "COMPLETE"
 
         # The result is a new model, so close the input model if it was opened here.

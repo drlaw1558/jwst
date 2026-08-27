@@ -1,4 +1,4 @@
-"""Public common step definition for OutlierDetection processing."""
+"""Detect outliers and set DQ flags accordingly."""
 
 import logging
 
@@ -14,9 +14,7 @@ from jwst.stpipe.utilities import query_step_status, record_step_status
 # Categorize all supported modes
 IMAGE_MODES = ["NRC_IMAGE", "MIR_IMAGE", "NRS_IMAGE", "NIS_IMAGE", "FGS_IMAGE"]
 SLIT_SPEC_MODES = ["NRC_WFSS", "MIR_LRS-FIXEDSLIT", "NRS_FIXEDSLIT", "NRS_MSASPEC", "NIS_WFSS"]
-TSO_SPEC_MODES = ["NIS_SOSS", "MIR_LRS-SLITLESS", "NRC_TSGRISM", "NRS_BRIGHTOBJ"]
 IFU_SPEC_MODES = ["NRS_IFU", "MIR_MRS"]
-TSO_IMAGE_MODES = ["NRC_TSIMAGE"]  # missing MIR_IMAGE with TSOVIST=True, not really addable
 CORON_IMAGE_MODES = ["NRC_CORON", "MIR_LYOT", "MIR_4QPM"]
 
 __all__ = ["OutlierDetectionStep"]
@@ -65,11 +63,12 @@ class OutlierDetectionStep(Step):
 
         Parameters
         ----------
-        input_data : asn file, `~jwst.datamodels.container.ModelContainer`, or \
+        input_data : str, `~jwst.datamodels.container.ModelContainer`, or \
                      `~jwst.datamodels.library.ModelLibrary`
-            The input association.
-            For imaging modes a ModelLibrary is expected, whereas for spectroscopic modes a
-            ModelContainer is expected.
+            The input association filename or object.
+            For imaging modes a `~jwst.datamodels.library.ModelLibrary`
+            is expected, whereas for spectroscopic modes a
+            `~jwst.datamodels.container.ModelContainer` expected.
 
         Returns
         -------
@@ -171,7 +170,7 @@ class OutlierDetectionStep(Step):
             log.error(f"Outlier detection failed for unknown/unsupported mode: {mode}")
             record_step_status(result_models, "outlier_detection", False)
 
-        if query_step_status(result_models, "outlier_detection") != "SKIPPED":
+        if query_step_status(result_models, "outlier_detection") not in ("SKIPPED", "FAILED"):
             record_step_status(result_models, "outlier_detection", True)
         return result_models
 

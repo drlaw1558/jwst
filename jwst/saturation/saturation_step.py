@@ -1,3 +1,5 @@
+"""Set saturation flags for pixels."""
+
 import logging
 
 from stdatamodels.jwst import datamodels
@@ -31,7 +33,7 @@ class SaturationStep(Step):
         Parameters
         ----------
         step_input : `~stdatamodels.jwst.datamodels.RampModel` or str
-            Input datamodel or string name of the fits file.
+            Input datamodel or FITS filename.
 
         Returns
         -------
@@ -39,7 +41,7 @@ class SaturationStep(Step):
             Output datamodel with saturation flags set for saturated pixels.
         """
         # Open the input data model
-        result = self.prepare_output(step_input, open_as_type=datamodels.RampModel)
+        result = self.prepare_output(step_input, open_as_ramp=True)
 
         # Get the name of the saturation reference file
         ref_name = self.get_reference_file(result, "saturation")

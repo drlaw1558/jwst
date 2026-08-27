@@ -4,7 +4,7 @@ import warnings
 
 import numpy as np
 from astropy.modeling.mappings import Mapping
-from scipy import sparse
+from scipy.interpolate import interp1d
 
 from jwst.lib.winclip import get_clipped_pixels
 from jwst.wfss_contam.sens1d import create_1d_sens
@@ -71,7 +71,11 @@ def _determine_native_wl_spacing(
     # Create list of wavelengths on which to compute dispersed pixels
     dw = np.abs((wmax - wmin) / (dyw - dxw))
     dlam = np.median(dw / oversample_factor)
-    lambdas = np.arange(wmin, wmax + dlam, dlam)
+    # need at least three points because often the sensitivity curve
+    # is not well-defined at the edges. This is typically hit only for Order 0,
+    # since dlam can be large or poorly defined in that case.
+    npts = max(int(np.ceil((wmax - wmin) / dlam)), 3)
+    lambdas = np.linspace(wmin, wmax, npts)
     return lambdas
 
 
@@ -117,7 +121,7 @@ def _disperse_onto_grism(x0_sky, y0_sky, sky_to_imgxy, imgxy_to_grismxy, lambdas
     return x0s, y0s, lambdas
 
 
-def _collect_outputs_by_source(xs, ys, counts, source_ids_per_pixel):
+def _collect_outputs_by_source(xs, ys, counts, source_ids_per_pixel, model_counts=None):
     """
     Collect the dispersed pixel values into separate images for each source.
 
@@ -131,6 +135,8 @@ def _collect_outputs_by_source(xs, ys, counts, source_ids_per_pixel):
         Count rates of dispersed pixels
     source_ids_per_pixel : int array
         Source IDs of the dispersed pixels
+    model_counts : list of ndarray, optional
+        List of count rate arrays corresponding to input ``basis_models``
 
     Returns
     -------
@@ -143,6 +149,8 @@ def _collect_outputs_by_source(xs, ys, counts, source_ids_per_pixel):
     sorted_xs = xs[sort_idx]
     sorted_ys = ys[sort_idx]
     sorted_counts = counts[sort_idx]
+    if model_counts is not None and len(model_counts) > 0:
+        sorted_model_counts = [mc[sort_idx] for mc in model_counts]
 
     # Compute per-source bounds in a vectorized way
     unique_ids, split_points = np.unique(sorted_ids, return_index=True)
@@ -167,6 +175,11 @@ def _collect_outputs_by_source(xs, ys, counts, source_ids_per_pixel):
             "bounds": bounds,
             "image": img,
         }
+        if model_counts is not None and len(model_counts) > 0:
+            outputs_by_source[this_sid]["model_counts"] = [
+                _build_dispersed_image_of_source(this_xs, this_ys, mc[start:end], bounds)
+                for mc in sorted_model_counts
+            ]
     return outputs_by_source
 
 
@@ -191,15 +204,83 @@ def _build_dispersed_image_of_source(x, y, flux, bounds):
         2-D dispersed image of the source
     """
     minx, maxx, miny, maxy = bounds
-    return sparse.coo_matrix(
-        (flux, (y - miny, x - minx)), shape=(maxy - miny + 1, maxx - minx + 1)
-    ).toarray()
+    img = np.zeros((maxy - miny + 1, maxx - minx + 1), dtype=flux.dtype)
+    np.add.at(img, (y - miny, x - minx), flux)
+    return img
+
+
+def _replace_nans(fluxes):
+    """
+    Replace NaNs in multi-band fluxes along the wavelength axis (axis 0).
+
+    Interior NaNs are filled by linear interpolation between the nearest valid
+    bands on each side.  Edge NaNs (no valid band on one side) are filled by
+    flat extrapolation from the nearest valid band.
+
+    Parameters
+    ----------
+    fluxes : ndarray
+        Array of shape (N, n_pixels) containing fluxes for N photometric bands.
+
+    Returns
+    -------
+    filled_fluxes : ndarray
+        Input array ``fluxes`` but with NaNs replaced, updated in place.
+    """
+    valid_mask = np.isfinite(fluxes)
+    if not (~valid_mask).any():
+        return fluxes
+
+    n, _npix = fluxes.shape
+    band_idx = np.arange(n)
+
+    # For each position, find the index of the nearest valid band to the left
+    # (or -1 if none) and to the right (or N if none) along wavelength axis (0).
+    left_indices = np.where(valid_mask, band_idx[:, None], -1)
+    np.maximum.accumulate(left_indices, axis=0, out=left_indices)
+
+    right_indices = np.where(valid_mask, band_idx[:, None], n)
+    np.minimum.accumulate(right_indices[::-1], axis=0, out=right_indices[::-1])
+
+    # make bool arrays for whether there is a non-NaN band to the left or right of each NaN
+    # rows is wavelength axis, cols is pixel axis
+    nan_rows, nan_cols = np.where(~valid_mask)
+    left_i = left_indices[nan_rows, nan_cols]
+    right_i = right_indices[nan_rows, nan_cols]
+    has_left = left_i >= 0
+    has_right = right_i < n
+    interior = has_left & has_right
+    only_right = ~has_left & has_right
+    only_left = has_left & ~has_right
+
+    # interior NaNs: linearly interpolate
+    if interior.any():
+        r, c = nan_rows[interior], nan_cols[interior]
+        # find flux at nearest non-nan to both left and right, then use those to find the slope
+        li, ri = left_i[interior], right_i[interior]
+        slope = (r - li) / (ri - li)
+        fluxes[r, c] = fluxes[li, c] + slope * (fluxes[ri, c] - fluxes[li, c])
+
+    # leading NaNs: flat fill from the right
+    if only_right.any():
+        r, c = nan_rows[only_right], nan_cols[only_right]
+        # replace flux with that at nearest non-nan to the right
+        fluxes[r, c] = fluxes[right_i[only_right], c]
+
+    # trailing NaNs: flat fill from the left
+    if only_left.any():
+        r, c = nan_rows[only_left], nan_cols[only_left]
+        # replace flux with that at nearest non-nan to the left
+        fluxes[r, c] = fluxes[left_i[only_left], c]
+
+    return fluxes
 
 
 def disperse(
     xs,
     ys,
     fluxes,
+    band_wavelengths,
     source_ids_per_pixel,
     order,
     wmin,
@@ -210,6 +291,7 @@ def disperse(
     grism_wcs,
     naxis,
     oversample_factor=2,
+    basis_models=None,
 ):
     """
     Compute the dispersed image pixel values from the direct image.
@@ -220,9 +302,16 @@ def disperse(
         Flat array of X coordinates of pixels in the direct image
     ys : ndarray
         Flat array of Y coordinates of pixels in the direct image
-    fluxes : ndarray
-        Fluxes of the pixels in the direct image corresponding to xs, ys.
-        These should have units of MJy/sr.
+    fluxes : ndarray of shape (N, n_pixels)
+        Fluxes of the pixels in the direct image corresponding to xs, ys,
+        in units of MJy/sr.  N is the number of photometric bands; use N=1
+        for a flat (wavelength-independent) SED. Note in that case the array must still be 2-D.
+    band_wavelengths : ndarray
+        Central wavelengths (in microns) of each photometric band in
+        ``fluxes`` (shape (N,)).  Fluxes are linearly interpolated onto the internal
+        wavelength grid. Fluxes are held constant (flat extrapolation)
+        outside the covered wavelength range. For a flat SED this can be any length-1 array,
+        as it is not used with N=1.
     source_ids_per_pixel : int array
         Source IDs of the input pixels in the segmentation map
     order : int
@@ -244,6 +333,10 @@ def disperse(
         Dimensions of the grism image (naxis[0], naxis[1])
     oversample_factor : int, optional
         Factor by which to oversample the wavelength grid
+    basis_models : list[Callable], optional
+        Flux distributions to evaluate at each wavelength. Typically these will be single
+        polynomial orders, e.g. [lambda x: x, lambda x: x^2], ...] the coefficients of which
+        are linearly fit later.
 
     Returns
     -------
@@ -287,8 +380,29 @@ def disperse(
         wmax,
         oversample_factor=oversample_factor,
     )
-    nlam = len(lambdas)
     dlam = lambdas[1] - lambdas[0]
+    nlam = len(lambdas)
+
+    # Interpolate the input fluxes onto the wavelength grid of the dispersed image
+    if len(band_wavelengths) >= 2:
+        # interp1d does not handle NaNs, so replace with interplation that assumes
+        # flat spectrum at the edges and linear interpolation in the interior,
+        # which is what the behavior would be if we were to call interp1d separately
+        # on each pixel's spectrum after removing NaNs.
+        fluxes = _replace_nans(fluxes)
+        interp_fn = interp1d(
+            band_wavelengths,
+            fluxes,
+            axis=0,
+            kind="linear",
+            bounds_error=False,
+            fill_value=(fluxes[0], fluxes[-1]),  # flat extrapolation
+        )
+        fluxes = interp_fn(lambdas)  # (nlam, n_pixels)
+    else:
+        # constant flux across all wavelengths
+        fluxes = np.repeat(fluxes[0][np.newaxis, :], nlam, axis=0)
+    source_ids_per_pixel = np.repeat(source_ids_per_pixel[np.newaxis, :], nlam, axis=0)
 
     x0s, y0s, lambdas = _disperse_onto_grism(
         x0_sky,
@@ -305,9 +419,6 @@ def disperse(
     if x0s.min() >= naxis[0] or x0s.max() < 0 or y0s.min() >= naxis[1] or y0s.max() < 0:
         return
 
-    source_ids_per_pixel = np.repeat(source_ids_per_pixel[np.newaxis, :], nlam, axis=0)
-    fluxes = np.repeat(fluxes[np.newaxis, :], nlam, axis=0)
-
     # Discretize x and y coordinates to integer pixel values, keeping track of the fractional area
     # that each pixel contributes to the final grism image.
     # The resulting x, y coordinate pairs are non-unique: there are multiple wavelengths
@@ -319,11 +430,16 @@ def disperse(
     lambdas = np.take(lambdas, index)
     fluxes = np.take(fluxes, index)
     source_ids_per_pixel = np.take(source_ids_per_pixel, index)
-    del index
+
+    # Evaluate basis models on the 1-D lambda array.
+    # even after np.take this is element-wise so this is still full resolution
+    model_f = []
+    if basis_models is not None:
+        for flam in basis_models:
+            model_f.append(flam(lambdas))
 
     # compute 1D sensitivity array corresponding to list of wavelengths
     sens, no_cal = create_1d_sens(lambdas, sens_waves, sens_resp)
-    del lambdas
 
     # Compute countrates for dispersed pixels.
     # The input direct image data is already photometrically calibrated,
@@ -332,12 +448,27 @@ def disperse(
     # Note that the photom reference files are constructed with per-wavelength units,
     # so oversampling is accounted for by the spacing of dlam.
     with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", category=RuntimeWarning, message="divide by zero")
+        warnings.filterwarnings(
+            "ignore", category=RuntimeWarning, message="divide by zero|invalid value"
+        )
         counts = fluxes * areas * dlam / sens
     counts[no_cal] = 0.0  # set to zero where no flux cal info available
-    del fluxes, areas, sens, dlam, no_cal
 
-    outputs_by_source = _collect_outputs_by_source(xs, ys, counts, source_ids_per_pixel)
+    # Also convert basis models to counts.
+    model_counts = []
+    for f in model_f:
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", category=RuntimeWarning, message="divide by zero|invalid value"
+            )
+            model_counts_i = fluxes * f * areas * dlam / sens
+        model_counts_i[no_cal] = 0.0
+        model_counts.append(model_counts_i)
+    del fluxes, areas, sens, dlam, no_cal, lambdas, index
+
+    outputs_by_source = _collect_outputs_by_source(
+        xs, ys, counts, source_ids_per_pixel, model_counts
+    )
     del xs, ys, counts, source_ids_per_pixel
     n_out = len(outputs_by_source)
     log.debug(

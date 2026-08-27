@@ -25,7 +25,6 @@ def run_detector1(rtdata_module):
     args = [
         "calwebb_detector1",
         rtdata.input,
-        "--steps.persistence.save_trapsfilled=False",
         "--steps.dq_init.save_results=True",
         "--steps.saturation.save_results=True",
         "--steps.superbias.save_results=True",
@@ -53,7 +52,6 @@ def run_detector1_multiprocess_rate(rtdata_module):
     args = [
         "calwebb_detector1",
         rtdata.input,
-        "--steps.persistence.save_trapsfilled=False",
         "--steps.dq_init.save_results=True",
         "--steps.saturation.save_results=True",
         "--steps.superbias.save_results=True",
@@ -82,7 +80,6 @@ def run_detector1_multiprocess_rate_save_opt(rtdata_module, resource_tracker):
     args = [
         "calwebb_detector1",
         rtdata.input,
-        "--steps.persistence.save_trapsfilled=False",
         "--steps.dq_init.save_results=True",
         "--steps.saturation.save_results=True",
         "--steps.superbias.save_results=True",
@@ -113,7 +110,6 @@ def run_detector1_multiprocess_jump(rtdata_module):
     args = [
         "calwebb_detector1",
         rtdata.input,
-        "--steps.persistence.save_trapsfilled=False",
         "--steps.dq_init.save_results=True",
         "--steps.saturation.save_results=True",
         "--steps.superbias.save_results=True",
@@ -263,7 +259,7 @@ def test_niriss_tweakreg_no_sources(rtdata, fitsdiff_default_kwargs, log_watcher
     # Check the status of the step is set correctly in the files.
     mc = datamodels.ModelContainer(rtdata.input)
     for model in mc:
-        assert model.meta.cal_step.tweakreg != "SKIPPED"
+        assert model.meta.cal_step.tweakreg is None
 
     watcher = log_watcher(
         "jwst.tweakreg.tweakreg_catalog", message="No sources found in the image", level="warning"
@@ -272,7 +268,7 @@ def test_niriss_tweakreg_no_sources(rtdata, fitsdiff_default_kwargs, log_watcher
     watcher.assert_seen()
     with result:
         for model in result:
-            assert model.meta.cal_step.tweakreg == "SKIPPED"
+            assert model.meta.cal_step.tweakreg == "FAILED"
             result.shelve(model, modify=False)
 
 

@@ -1,4 +1,5 @@
 import logging
+import warnings
 
 from stdatamodels.jwst import datamodels
 
@@ -17,13 +18,17 @@ class WfssContamStep(Step):
 
     spec = """
         save_simulated_image = boolean(default=False)  # Save full-frame simulated image
-        save_contam_images = boolean(default=False)  # Save source contam estimates
+        save_contam_images = boolean(default=None)  # Deprecated; has no effect
         maximum_cores = string(default='1')
         skip = boolean(default=True)
         orders = list(default=None)  # Spectral orders to process, e.g. 1, or 1,2,3
         magnitude_limit = float(default=None) # Isophotal AB magnitude limit for sources to be included in the contamination correction
         wl_oversample = integer(default=2) # oversampling factor for wavelength grid
         max_pixels_per_chunk = integer(default=5000) # max number of pixels to disperse at once
+        polyfit_degree = integer(default=None)  # Degree of polynomial fit to spectral shape
+        n_iterations = integer(default=1)  # Number of contamination-correction iterations
+        l2_alpha = float(default=0.1)  # L2 regularization strength for polynomial spectral fit
+        rejection_threshold = float(default=0.1)  # Threshold for rejecting polynomial fits based on fitted constant term coefficient
     """  # noqa: E501
 
     reference_file_types = ["photom", "wavelengthrange"]
@@ -41,9 +46,19 @@ class WfssContamStep(Step):
         Returns
         -------
         output_model : `~stdatamodels.jwst.datamodels.MultiSlitModel`
-            A copy of the input data model, with contamination removed.
+            A datamodel containing contamination-corrected source cutouts,
+            simulated cutouts, and contamination estimates.
         """
-        output_model = self.prepare_output(input_data)
+        if self.save_contam_images is not None:
+            msg = (
+                "The 'save_contam_images' parameter is deprecated and has no effect. "
+                "It will be removed in a future release, and attempting to specify it will "
+                "raise an error."
+            )
+            warnings.warn(msg, DeprecationWarning, stacklevel=2)
+            log.warning(msg)
+
+        output_model = self.prepare_output(input_data, open_as_type=datamodels.MultiSlitModel)
 
         # Get the wavelengthrange ref file
         waverange_ref = self.get_reference_file(output_model, "wavelengthrange")
@@ -60,7 +75,7 @@ class WfssContamStep(Step):
             datamodels.WavelengthrangeModel(waverange_ref) as waverange_model,
             datamodels.open(photom_ref) as photom_model,
         ):
-            result, simul, contam, simul_slits = wfss_contam.contam_corr(
+            result, simul = wfss_contam.contam_corr(
                 output_model,
                 waverange_model,
                 photom_model,
@@ -69,6 +84,10 @@ class WfssContamStep(Step):
                 magnitude_limit=self.magnitude_limit,
                 oversample_factor=self.wl_oversample,
                 max_pixels_per_chunk=self.max_pixels_per_chunk,
+                polyfit_degree=self.polyfit_degree,
+                n_iterations=self.n_iterations,
+                l2_alpha=self.l2_alpha,
+                rejection_threshold=self.rejection_threshold,
             )
         if simul is None:
             # Input model is returned as result, no intermediate models created
@@ -79,16 +98,7 @@ class WfssContamStep(Step):
         if self.save_simulated_image:
             simul_path = self.save_model(simul, suffix="simul", force=True)
             log.info(f'Full-frame simulated grism image saved to "{simul_path}"')
-            simul_slits_path = self.save_model(simul_slits, suffix="simul_slits", force=True)
-            log.info(f'Simulated slits saved to "{simul_slits_path}"')
-        if self.save_contam_images:
-            contam_path = self.save_model(contam, suffix="contam", force=True)
-            log.info(f'Contamination estimates saved to "{contam_path}"')
-
-        # Close intermediate files
         simul.close()
-        simul_slits.close()
-        contam.close()
 
         # If the step succeeded, it created a new output model, so
         # close the input if it was opened here.

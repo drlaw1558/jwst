@@ -1,6 +1,5 @@
 import logging
 import traceback
-import warnings
 from collections import defaultdict
 from pathlib import Path
 
@@ -71,7 +70,6 @@ class Spec2Pipeline(Pipeline):
     class_alias = "calwebb_spec2"
 
     spec = """
-        save_bsub = boolean(default=False) # Deprecated; use the background step's save_results parameter instead.
         fail_on_exception = boolean(default=True) # Fail if any product fails.
         save_wfss_esec = boolean(default=False)   # Save WFSS e-/sec image
     """  # noqa: E501
@@ -122,21 +120,11 @@ class Spec2Pipeline(Pipeline):
         """
         log.info("Starting calwebb_spec2 ...")
 
-        if self.save_bsub:
-            deprecation_message = (
-                "The --save_bsub parameter is deprecated and will be removed in a future release. "
-                "To toggle saving background-subtracted data, use the background step's "
-                "--save_results parameter instead."
-            )
-            warnings.warn(deprecation_message, DeprecationWarning, stacklevel=2)
-            log.warning(deprecation_message)
-
         # Setup step parameters required by the pipeline.
         self.resample_spec.save_results = self.save_results
         self.resample_spec.suffix = "s2d"
         self.cube_build.save_results = False
         self.cube_build.skip_dqflagging = True
-        self.cube_build.pipeline = 2
         self.extract_1d.save_results = self.save_results
         # Retrieve the input(s)
         asn = self.load_as_level2_asn(data)
@@ -380,56 +368,25 @@ class Spec2Pipeline(Pipeline):
         calibrated.meta.asn.table_name = Path(asn_file).name
         calibrated.meta.filename = self.make_output_path(basepath=self.output_file, suffix=suffix)
 
+        # For all modes, call adaptive_trace_model and pixel_replace
+        resampled = calibrated.copy()
+        resampled = self.adaptive_trace_model.run(resampled)
+        resampled = self.pixel_replace.run(resampled)
+
         # Produce a resampled product, either via resample_spec for
         # "regular" spectra or cube_build for IFU data. No resampled
         # product is produced for time-series modes.
-        if exp_type in ["NRS_FIXEDSLIT", "NRS_MSASPEC", "MIR_LRS-FIXEDSLIT"] and not isinstance(
-            calibrated, datamodels.CubeModel
-        ):
-            # Call pixel replace, followed by resample_spec for 2D slit data
-            resampled = calibrated.copy()
-            # interpolate pixels that have a NaN value or are flagged
-            # as DO_NOT_USE or NON_SCIENCE.
-            resampled = self.pixel_replace.run(resampled)
-            resampled = self.resample_spec.run(resampled)
-
-        elif is_nrs_slit_linelamp(calibrated):
-            # Call pixel_replace followed by resample_spec for NRS 2D line lamp slit data
-            resampled = calibrated.copy()
-            # interpolate pixels that have a NaN value or are flagged
-            # as DO_NOT_USE or NON_SCIENCE.
-            resampled = self.pixel_replace.run(resampled)
+        if (
+            exp_type in ["NRS_FIXEDSLIT", "NRS_MSASPEC", "MIR_LRS-FIXEDSLIT"]
+            and not isinstance(calibrated, datamodels.CubeModel)
+        ) or is_nrs_slit_linelamp(calibrated):
             resampled = self.resample_spec.run(resampled)
 
         elif (exp_type in ["MIR_MRS", "NRS_IFU"]) or is_nrs_ifu_linelamp(calibrated):
-            # set the default output type for both instruments if is not set
-            if exp_type == "NRS_IFU" and self.cube_build.output_type is None:
-                self.cube_build.output_type = "band"
-
-            if is_nrs_ifu_linelamp(calibrated) and self.cube_build.output_type is None:
-                self.cube_build.output_type = "band"
-
-            if exp_type == "MIR_MRS" and self.cube_build.output_type is None:
-                self.cube_build.output_type = "multi"
-            resampled = calibrated.copy()
-            # First call adaptive_trace_model and pixel_replace then
-            # call cube_build step for IFU data.
-            resampled = self.adaptive_trace_model.run(resampled)
-            resampled = self.pixel_replace.run(resampled)
             resampled = self.cube_build.run(resampled)
             if query_step_status(resampled, "cube_build") == "COMPLETE":
                 self.save_model(resampled[0], suffix="s3d")
-        elif exp_type in ["MIR_LRS-SLITLESS"]:
-            resampled = calibrated.copy()
-            # interpolate pixels that have a NaN value or are flagged
-            # as DO_NOT_USE or NON_SCIENCE.
-            resampled = self.pixel_replace.run(resampled)
-        else:
-            # will be run if set in parameter ref file or by user
-            resampled = calibrated.copy()
-            # interpolate pixels that have a NaN value or are flagged
-            # as DO_NOT_USE or NON_SCIENCE.
-            resampled = self.pixel_replace.run(resampled)
+
         # Extract a 1D spectrum from the 2D/3D data
         if (
             exp_type in ["MIR_MRS", "NRS_IFU"]
@@ -438,9 +395,9 @@ class Spec2Pipeline(Pipeline):
             # Skip extract_1d for IFU modes where no cube was built
             self.extract_1d.skip = True
 
-        # SOSS data need to run photom on x1d products and optionally save the photom
+        # SOSS and WFSS/grism data need to run photom on x1d products and optionally save the photom
         # output, while all other exptypes simply run extract_1d.
-        if exp_type == "NIS_SOSS":
+        if exp_type in ["NIS_SOSS", "MIR_WFSS"] + GRISM_TYPES:
             if multi_int:
                 self.photom.suffix = "x1dints"
             else:
@@ -455,6 +412,14 @@ class Spec2Pipeline(Pipeline):
             else:
                 self.photom.save_results = self.save_results
                 x1d = self.photom.run(x1d)
+                # at this stage if photom was skipped we still want the x1d to save
+                if x1d.meta.cal_step.photom == "SKIPPED" and self.save_results:
+                    log.info(
+                        "Photom step was skipped for this x1d product. "
+                        "Saving uncalibrated x1d instead."
+                    )
+                    self.save_model(x1d, suffix=self.photom.suffix)
+
         elif exp_type == "NRS_MSASPEC":
             # Special handling for MSA spectra, to handle mixed-in
             # fixed slits separately
@@ -529,10 +494,6 @@ class Spec2Pipeline(Pipeline):
                 self.bkg_subtract.suffix = "bsub"
                 if multi_int:
                     self.bkg_subtract.suffix = "bsubints"
-
-                # Backwards compatibility
-                if self.save_bsub:
-                    self.bkg_subtract.save_results = True
             else:
                 log.debug(
                     "Science data does not allow direct background subtraction. "
@@ -695,7 +656,6 @@ class Spec2Pipeline(Pipeline):
         calibrated = self.pathloss.run(calibrated)
         calibrated = self.barshadow.run(calibrated)
         calibrated = self.wfss_contam.run(calibrated)
-        calibrated = self.photom.run(calibrated)
         return calibrated
 
     def _process_miri_wfss(self, data):
@@ -732,7 +692,6 @@ class Spec2Pipeline(Pipeline):
         calibrated = self.extract_2d.run(calibrated)
         calibrated = self.srctype.run(calibrated)
         calibrated = self.pathloss.run(calibrated)
-        calibrated = self.photom.run(calibrated)
         return calibrated
 
     def _process_nirspec_slits(self, data):
@@ -808,7 +767,6 @@ class Spec2Pipeline(Pipeline):
 
         # First process MOS slits through all remaining steps
         calib_mos.update(calibrated)
-        calib_mos.meta.wcsinfo = calibrated.meta.wcsinfo.instance
         if len(calib_mos.slits) > 0:
             calib_mos = self.master_background_mos.run(calib_mos)
             calib_mos = self.wavecorr.run(calib_mos)

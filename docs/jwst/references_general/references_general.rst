@@ -52,6 +52,8 @@ documentation on each reference file.
 +-------------------------------------------------------+--------------------------------------------------+
 | :ref:`assign_wcs <assign_wcs_step>`                   | :ref:`CAMERA <camera_reffile>`                   |
 +                                                       +--------------------------------------------------+
+|                                                       | :ref:`CHROMCORR <chromcorr_reffile>`             |
++                                                       +--------------------------------------------------+
 |                                                       | :ref:`COLLIMATOR <collimator_reffile>`           |
 +                                                       +--------------------------------------------------+
 |                                                       | :ref:`DISPERSER <disperser_reffile>`             |
@@ -136,12 +138,6 @@ documentation on each reference file.
 +-------------------------------------------------------+--------------------------------------------------+
 | :ref:`pathloss <pathloss_step>`                       | :ref:`PATHLOSS <pathloss_reffile>`               |
 +-------------------------------------------------------+--------------------------------------------------+
-| :ref:`persistence <persistence_step>`                 | :ref:`PERSAT <persat_reffile>`                   |
-+                                                       +--------------------------------------------------+
-|                                                       | :ref:`TRAPDENSITY <trapdensity_reffile>`         |
-+                                                       +--------------------------------------------------+
-|                                                       | :ref:`TRAPPARS <trappars_reffile>`               |
-+-------------------------------------------------------+--------------------------------------------------+
 | :ref:`photom <photom_step>`                           | :ref:`PHOTOM <photom_reffile>`                   |
 +                                                       +--------------------------------------------------+
 |                                                       | :ref:`AREA <area_reffile>`                       |
@@ -205,6 +201,8 @@ documentation on each reference file.
 | :ref:`BARSHADOW <barshadow_reffile>`             | :ref:`barshadow <barshadow_step>`                     |
 +--------------------------------------------------+-------------------------------------------------------+
 | :ref:`CAMERA <camera_reffile>`                   | :ref:`assign_wcs <assign_wcs_step>`                   |
++--------------------------------------------------+-------------------------------------------------------+
+| :ref:`CHROMCORR <chromcorr_reffile>`             | :ref:`assign_wcs <assign_wcs_step>`                   |
 +--------------------------------------------------+-------------------------------------------------------+
 | :ref:`COLLIMATOR <collimator_reffile>`           | :ref:`assign_wcs <assign_wcs_step>`                   |
 +--------------------------------------------------+-------------------------------------------------------+
@@ -274,8 +272,6 @@ documentation on each reference file.
 +--------------------------------------------------+-------------------------------------------------------+
 | :ref:`PATHLOSS <pathloss_reffile>`               | :ref:`pathloss <pathloss_step>`                       |
 +--------------------------------------------------+-------------------------------------------------------+
-| :ref:`PERSAT <persat_reffile>`                   | :ref:`persistence <persistence_step>`                 |
-+--------------------------------------------------+-------------------------------------------------------+
 | :ref:`PHOTOM <photom_reffile>`                   | :ref:`photom <photom_step>`                           |
 +                                                  +-------------------------------------------------------+
 |                                                  | :ref:`wfss_contam <wfss_contam_step>`                 |
@@ -313,10 +309,6 @@ documentation on each reference file.
 | :ref:`SUPERBIAS <superbias_reffile>`             | :ref:`saturation <saturation_step>`                   |
 +                                                  +-------------------------------------------------------+
 |                                                  | :ref:`superbias <superbias_step>`                     |
-+--------------------------------------------------+-------------------------------------------------------+
-| :ref:`TRAPDENSITY <trapdensity_reffile>`         | :ref:`persistence <persistence_step>`                 |
-+--------------------------------------------------+-------------------------------------------------------+
-| :ref:`TRAPPARS <trappars_reffile>`               | :ref:`persistence <persistence_step>`                 |
 +--------------------------------------------------+-------------------------------------------------------+
 | :ref:`WAVELENGTHRANGE <wavelengthrange_reffile>` | :ref:`assign_wcs <assign_wcs_step>`                   |
 +                                                  +-------------------------------------------------------+
@@ -481,8 +473,8 @@ As each pipeline step is applied to a science data product, it will record a sta
 header keyword of the science data product. The current list of step status keyword names is given
 in the following table. These status keywords may be included in the primary header of reference
 files, in order to maintain a history of the data that went into creating the reference file.
-Allowed values for the status keywords are 'COMPLETE' and 'SKIPPED'. Absence of a particular keyword
-is understood to mean that step was not even attempted.
+Allowed values for the status keywords are 'COMPLETE', 'SKIPPED', or 'FAILED'. Absence of a particular
+keyword is understood to mean that step was not even attempted.
 
 Table 1.  Keywords Documenting Which Pipeline Steps Have Been Performed.
 
@@ -540,6 +532,7 @@ S_STRAY     Straylight correction
 S_SUPERB    Superbias subtraction
 S_TACNTR    Source position from TA verification image
 S_TELEMI    Telescope emission correction
+S_TRCMOD    Adaptive trace modeling
 S_TSPHOT    TSO imaging photometry
 S_TWKREG    Tweakreg image alignment
 S_WAVCOR    Wavelength correction

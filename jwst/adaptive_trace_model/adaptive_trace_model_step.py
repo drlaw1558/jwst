@@ -24,6 +24,7 @@ class AdaptiveTraceModelStep(Step):
     save_intermediate_results = boolean(default=False)  # Save the full spline model and residuals.
     skip = boolean(default=True) # By default, skip the step.
     output_use_model = boolean(default=True) # Use input filenames in the output models
+    maximum_cores = string(default='none') # cores for multiprocessing. Can be an integer, 'half', 'quarter', or 'all'
     """  # noqa: E501
 
     def process(self, input_data):
@@ -76,30 +77,77 @@ class AdaptiveTraceModelStep(Step):
         output_model = self.prepare_output(input_data)
         if isinstance(output_model, ModelContainer):
             models = output_model
-
-            # Set up output path name to include the ASN ID if available
-            self.add_asn_id_to_output_name(models)
-
         else:
             models = [output_model]
 
-        for model in models:
-            if not isinstance(model, datamodels.IFUImageModel):
-                log.warning("The adaptive_trace_model step is only implemented for IFU data.")
-                log.warning("Skipping processing for datamodel type %s.", str(output_model))
-                model.meta.cal_step.adaptive_trace_model = "SKIPPED"
-                continue
+        # Set up output path name to include the ASN ID if available
+        self.add_asn_id_to_output_name(models)
 
-            # Update the model in place
+        # Update each model in place
+        for model in models:
             log.info("Fitting trace model for %s", model.meta.filename)
-            results = fit_and_oversample(
-                model,
-                fit_threshold=self.fit_threshold,
-                slope_limit=self.slope_limit,
-                oversample_factor=self.oversample,
-                psf_optimal=self.psf_optimal,
-                return_intermediate_models=self.save_intermediate_results,
-            )
+            if isinstance(model, datamodels.MultiSlitModel):
+                results = None
+                if self.save_intermediate_results:
+                    new_model = datamodels.MultiSlitModel()
+                    new_model.update(model, only="PRIMARY")
+                    if self.oversample == 1.0:
+                        results = [None, new_model, new_model.copy(), None, None]
+                    else:
+                        results = [
+                            None,
+                            new_model,
+                            new_model.copy(),
+                            new_model.copy(),
+                            new_model.copy(),
+                        ]
+                for slit in model.slits:
+                    log.info(f"Working on slit {slit.name}")
+                    log.debug(f"Slit is of type {type(slit)}")
+                    slit_results = fit_and_oversample(
+                        slit,
+                        fit_threshold=self.fit_threshold,
+                        slope_limit=self.slope_limit,
+                        oversample_factor=self.oversample,
+                        psf_optimal=self.psf_optimal,
+                        return_intermediate_models=self.save_intermediate_results,
+                        metadata_model=model,
+                    )
+                    if self.save_intermediate_results:
+                        for i, intermediate_model in enumerate(slit_results[1:]):
+                            if intermediate_model is not None:
+                                results[i + 1].slits.append(intermediate_model)
+
+            elif isinstance(model, (datamodels.SlitModel, datamodels.IFUImageModel)):
+                results = fit_and_oversample(
+                    model,
+                    fit_threshold=self.fit_threshold,
+                    slope_limit=self.slope_limit,
+                    oversample_factor=self.oversample,
+                    psf_optimal=self.psf_optimal,
+                    return_intermediate_models=self.save_intermediate_results,
+                    maximum_cores=self.maximum_cores,
+                )
+            else:
+                log.warning(
+                    "The adaptive_trace_model step is not implemented for datamodel type <%s>.",
+                    model.meta.model_type,
+                )
+
+                # Might be old-style MIRI LRS data, which used to be ImageModel or CubeModel.
+                # Issue a specific warning in this case.
+                if "MIR_LRS" in str(model.meta.exposure.type):
+                    log.warning(
+                        "The adaptive_trace_model step requires MIRI LRS cal files "
+                        "in <SlitModel> format, from jwst v2.0 or later."
+                    )
+                    log.warning(
+                        "Try reprocessing the input exposures with the latest pipeline version."
+                    )
+
+                log.warning("No trace model will be attempted.")
+                model.meta.cal_step.adaptive_trace_model = "FAILED"
+                continue
 
             model.meta.cal_step.adaptive_trace_model = "COMPLETE"
             if self.save_intermediate_results:
