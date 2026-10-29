@@ -3,8 +3,11 @@ Test the utility functions
 """
 
 import gwcs
+import numpy as np
+import pytest
 from astropy import coordinates as coord
 from astropy import units as u
+from astropy.modeling import CompoundModel
 from astropy.modeling.models import Identity, Shift
 from astropy.table import QTable
 from astropy.utils.data import get_pkg_data_filename
@@ -15,10 +18,12 @@ from jwst.assign_wcs.util import (
     get_object_info,
     is_sky_like,
     subarray_transform,
+    substripe_subarray_transforms,
     transform_bbox_from_shape,
     wcs_bbox_from_shape,
 )
 from jwst.lib.catalog_utils import SkyObject
+from jwst.tests.nircam_rate_helpers import nircam_dhs_nrca1_sub260_rate_model
 
 
 def test_transform_bbox_from_shape_2d():
@@ -119,3 +124,25 @@ def test_is_sky_like():
 
     frame = gwcs.CelestialFrame(name="icrs", axes_order=(0, 1), reference_frame=coord.ICRS())
     assert is_sky_like(frame)
+
+
+@pytest.mark.parametrize("full_frame", [True, False])
+def test_substripe_subarray_transforms(full_frame):
+    mock_substripe = nircam_dhs_nrca1_sub260_rate_model(with_wcs=False)
+    stripe_ids = [10, 9, 8, 7]
+
+    # if not full frame, offsets subtract the stripe size to get
+    # relative coordinates
+    expected = np.arange(-1, -260, -65)
+
+    if full_frame:
+        # add in full frame offset but still subtract off stripe size
+        expected = np.array([1515, 1640, 1765, 1890]) + expected
+
+    transforms = substripe_subarray_transforms(mock_substripe, stripe_ids, full_frame=full_frame)
+    for i, stripe in enumerate(stripe_ids):
+        assert isinstance(transforms[stripe], CompoundModel)
+        # x offset is zero for all stripes
+        assert transforms[stripe][0].offset.value == 0
+        # y offset is as expected
+        assert transforms[stripe][1].offset.value == expected[i]

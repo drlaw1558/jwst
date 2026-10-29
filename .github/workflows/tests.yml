@@ -37,8 +37,8 @@ concurrency:
 permissions: {}
 
 env:
-  PYTHON_VERSIONS: 3.9 3.10 3.11 3.12 3.13 3.14
-  CRDS_PATH: /tmp/data/crds_cache
+  PYTHON_VERSIONS: 3.12 3.13 3.14 3.15
+  CRDS_PATH: ~/.crds_cache
   CRDS_OBSERVATORY: jwst
   CRDS_SERVER_URL: ${{ inputs.crds_server || 'https://jwst-crds.stsci.edu' }}
   CRDS_CLIENT_RETRY_COUNT: 3
@@ -48,10 +48,10 @@ jobs:
   supported-pythons:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3"
       - run: pip install packaging tomli
@@ -82,7 +82,7 @@ jobs:
   crds:
     runs-on: ubuntu-latest
     steps:
-      - if: inputs.crds_context
+      - if: inputs.crds_context == ''
         id: latest-context
         run: >
           echo latest-context=$(
@@ -99,7 +99,9 @@ jobs:
     needs:
       - supported-pythons
       - crds
-    uses: OpenAstronomy/github-actions-workflows/.github/workflows/tox.yml@e5af21e4ae37af089a73bb032e10b78b0e746174 # v3.0.1
+    uses: OpenAstronomy/github-actions-workflows/.github/workflows/tox.yml@1285b95e32c783cfa40eb2ffbd6ca4cd023fb884 # v3.2.2
+    permissions:
+      id-token: write
     with:
       setenv: |
         CRDS_PATH: ${{ needs.crds.outputs.path }}
@@ -113,14 +115,13 @@ jobs:
         - linux: check-dependencies
           python-version: ${{ needs.supported-pythons.outputs.latest }} 
         - name: run tests (oldest supported Python, ubuntu-latest)
-          linux: py3-oldestdeps-cov-xdist
-          python-version: ${{ needs.supported-pythons.outputs.oldest }}
+          linux: py312-oldestdeps-cov-xdist
         - linux: py*-xdist
         - name: run tests with coverage (latest supported Python, ubuntu-latest)
           linux: py3-cov-xdist
           python-version: ${{ needs.supported-pythons.outputs.latest }}
           pytest-results-summary: true
-          coverage: codecov
+          coverage: codecov-oidc
         - name: run tests (latest supported Python, macos-latest)
           macos: py3-xdist
           python-version: ${{ needs.supported-pythons.outputs.latest }}

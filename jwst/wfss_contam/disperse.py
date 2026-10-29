@@ -4,7 +4,6 @@ import warnings
 
 import numpy as np
 from astropy.modeling.mappings import Mapping
-from scipy import sparse
 from scipy.interpolate import interp1d
 
 from jwst.lib.winclip import get_clipped_pixels
@@ -16,71 +15,9 @@ log = logging.getLogger(__name__)
 __all__ = ["disperse"]
 
 
-def _determine_native_wl_spacing(
-    x0_sky,
-    y0_sky,
-    sky_to_imgxy,
-    imgxy_to_grismxy,
-    order,
-    wmin,
-    wmax,
-    oversample_factor=2,
+def _disperse_onto_grism(
+    x0_sky, y0_sky, sky_to_imgxy, imgxy_to_grismxy, lambdas, order, trace_pdt=None
 ):
-    """
-    Determine the wavelength spacing necessary to adequately sample the dispersed frame.
-
-    Parameters
-    ----------
-    x0_sky : float or ndarray
-        RA of the input pixel position in direct image and segmentation map
-    y0_sky : float or ndarray
-        Dec of the input pixel position in direct image and segmentation map
-    sky_to_imgxy : astropy model
-        Transform from sky to image coordinates
-    imgxy_to_grismxy : astropy model
-        Transform from image to grism coordinates
-    order : int
-        Spectral order number
-    wmin : float
-        Minimum wavelength for dispersed spectra
-    wmax : float
-        Maximum wavelength for dispersed spectra
-    oversample_factor : int, optional
-        Factor by which to oversample the wavelength grid
-
-    Returns
-    -------
-    lambdas : ndarray
-        Wavelengths at which to compute dispersed pixel values
-
-    Notes
-    -----
-    It was found that the native wavelength spacing varies by a few percent or less
-    across the detector for both NIRCam and NIRISS. This function has the capability to
-    take in many x0, y0 at once and take the median to get the wavelengths,
-    but typically it's okay to just put in any x0, y0 pair.
-    """
-    # Get x/y positions in the grism image corresponding to wmin and wmax:
-    # Convert to x/y in the direct image frame
-    x0_xy, y0_xy, _, _ = sky_to_imgxy(x0_sky, y0_sky, 1, order)
-    # then convert to x/y in the grism image frame.
-    xwmin, ywmin = imgxy_to_grismxy(x0_xy, y0_xy, wmin, order)
-    xwmax, ywmax = imgxy_to_grismxy(x0_xy, y0_xy, wmax, order)
-    dxw = xwmax - xwmin
-    dyw = ywmax - ywmin
-
-    # Create list of wavelengths on which to compute dispersed pixels
-    dw = np.abs((wmax - wmin) / (dyw - dxw))
-    dlam = np.median(dw / oversample_factor)
-    # need at least three points because often the sensitivity curve
-    # is not well-defined at the edges. This is typically hit only for Order 0,
-    # since dlam can be large or poorly defined in that case.
-    npts = max(int(np.ceil((wmax - wmin) / dlam)), 3)
-    lambdas = np.linspace(wmin, wmax, npts)
-    return lambdas
-
-
-def _disperse_onto_grism(x0_sky, y0_sky, sky_to_imgxy, imgxy_to_grismxy, lambdas, order):
     """
     Compute x/y positions in the grism image for the set of desired wavelengths.
 
@@ -98,6 +35,9 @@ def _disperse_onto_grism(x0_sky, y0_sky, sky_to_imgxy, imgxy_to_grismxy, lambdas
         Wavelengths at which to compute dispersed pixel values
     order : int
         Spectral order number
+    trace_pdt : `~jwst.wfss_contam.trace_pdt.TracePDT`, optional
+        If provided, used in place of ``imgxy_to_grismxy`` to approximate the
+        dispersed pixel positions via a cached, precomputed grid.
 
     Returns
     -------
@@ -108,16 +48,19 @@ def _disperse_onto_grism(x0_sky, y0_sky, sky_to_imgxy, imgxy_to_grismxy, lambdas
     lambdas : ndarray
         Wavelengths corresponding to each dispersed pixel
     """
-    # x/y in image frame of grism image is the same for all wavelengths
-    x0_sky = np.repeat(x0_sky[np.newaxis, :], len(lambdas), axis=0)
-    y0_sky = np.repeat(y0_sky[np.newaxis, :], len(lambdas), axis=0)
+    # Evaluate sky-to-direct transform once on the unique per-pixel positions
+    x0_xy, y0_xy, _, _ = sky_to_imgxy(x0_sky, y0_sky, 1, order)
+    n_pixels = len(x0_xy)
 
-    x0_xy, y0_xy, _, _ = sky_to_imgxy(x0_sky, y0_sky, lambdas, order)
-    del x0_sky, y0_sky
-
-    # Convert to x/y in grism frame.
-    lambdas = np.repeat(lambdas[:, np.newaxis], x0_xy.shape[1], axis=1)
-    x0s, y0s = imgxy_to_grismxy(x0_xy, y0_xy, lambdas, order)
+    if trace_pdt is not None:
+        x0s, y0s = trace_pdt.evaluate_grid(x0_xy, y0_xy, lambdas)
+        lambdas = np.repeat(lambdas[:, np.newaxis], n_pixels, axis=1)
+    else:
+        n_lam = len(lambdas)
+        x0_xy = np.repeat(x0_xy[np.newaxis, :], n_lam, axis=0)
+        y0_xy = np.repeat(y0_xy[np.newaxis, :], n_lam, axis=0)
+        lambdas = np.repeat(lambdas[:, np.newaxis], n_pixels, axis=1)
+        x0s, y0s = imgxy_to_grismxy(x0_xy, y0_xy, lambdas, order)
     # x0s, y0s now have shape (n_lam, n_pixels)
     return x0s, y0s, lambdas
 
@@ -144,8 +87,22 @@ def _collect_outputs_by_source(xs, ys, counts, source_ids_per_pixel, model_count
     outputs_by_source : dict
         Dictionary containing dispersed images and bounds for each source ID
     """
+    # Chunks are pre-sorted by source ID before dispersing (see Observation.chunk_sources).
+    # Many observations have sources large enough that some chunks contain only pixels from
+    # a single source. The collect operation can be simplified a lot in that case.
+    first_sid = source_ids_per_pixel[0]
+    if (source_ids_per_pixel == first_sid).all():
+        bounds = [int(xs.min()), int(xs.max()), int(ys.min()), int(ys.max())]
+        img = _build_dispersed_image_of_source(xs, ys, counts, bounds)
+        outputs_by_source = {first_sid: {"bounds": bounds, "image": img}}
+        if model_counts is not None and len(model_counts) > 0:
+            outputs_by_source[first_sid]["model_counts"] = [
+                _build_dispersed_image_of_source(xs, ys, mc, bounds) for mc in model_counts
+            ]
+        return outputs_by_source
+
     # First sort by source ID. xs, ys input here cannot be assumed sorted after get_clipped_pixels
-    sort_idx = np.argsort(source_ids_per_pixel)
+    sort_idx = np.argsort(source_ids_per_pixel, kind="stable")
     sorted_ids = source_ids_per_pixel[sort_idx]
     sorted_xs = xs[sort_idx]
     sorted_ys = ys[sort_idx]
@@ -154,7 +111,15 @@ def _collect_outputs_by_source(xs, ys, counts, source_ids_per_pixel, model_count
         sorted_model_counts = [mc[sort_idx] for mc in model_counts]
 
     # Compute per-source bounds in a vectorized way
-    unique_ids, split_points = np.unique(sorted_ids, return_index=True)
+    # The following five lines used to be just
+    # `unique_ids, split_points = np.unique(sorted_ids, return_index=True)`
+    # but that re-sorts the array. This is more verbose but faster.
+    is_boundary = np.empty(len(sorted_ids), dtype=bool)
+    is_boundary[0] = True
+    np.not_equal(sorted_ids[1:], sorted_ids[:-1], out=is_boundary[1:])
+    split_points = np.flatnonzero(is_boundary)
+    unique_ids = sorted_ids[split_points]
+
     minxs = np.minimum.reduceat(sorted_xs, split_points)
     maxxs = np.maximum.reduceat(sorted_xs, split_points)
     minys = np.minimum.reduceat(sorted_ys, split_points)
@@ -203,11 +168,24 @@ def _build_dispersed_image_of_source(x, y, flux, bounds):
     -------
     a : ndarray
         2-D dispersed image of the source
+
+    Notes
+    -----
+    This function used to read as
+        img = np.zeros((maxy - miny + 1, maxx - minx + 1), dtype=flux.dtype)
+        np.add.at(img, (y - miny, x - minx), flux)
+        return img
+    but bincount is much faster albeit less readable, since we need to cast to 1-d
+    and then cast back to 2-d at the end.
     """
     minx, maxx, miny, maxy = bounds
-    return sparse.coo_matrix(
-        (flux, (y - miny, x - minx)), shape=(maxy - miny + 1, maxx - minx + 1)
-    ).toarray()
+    ncols = maxx - minx + 1
+    nrows = maxy - miny + 1
+
+    # Cast into 1-D so we can use bincount, which is faster than np.add.at
+    flat_idx = (y - miny) * ncols + (x - minx)
+    counts = np.bincount(flat_idx, weights=flux, minlength=nrows * ncols)
+    return counts.reshape((nrows, ncols)).astype(flux.dtype, copy=False)
 
 
 def _replace_nans(fluxes):
@@ -284,15 +262,14 @@ def disperse(
     band_wavelengths,
     source_ids_per_pixel,
     order,
-    wmin,
-    wmax,
+    lambdas,
     sens_waves,
     sens_resp,
     direct_image_wcs,
     grism_wcs,
     naxis,
-    oversample_factor=2,
     basis_models=None,
+    trace_pdt=None,
 ):
     """
     Compute the dispersed image pixel values from the direct image.
@@ -317,10 +294,8 @@ def disperse(
         Source IDs of the input pixels in the segmentation map
     order : int
         Spectral order number
-    wmin : float
-        Minimum wavelength for dispersed spectra
-    wmax : float
-        Maximum wavelength for dispersed spectra
+    lambdas : ndarray
+        Wavelengths at which to compute dispersed pixel values.
     sens_waves : float array
         Wavelength array from photom reference file. Expected unit is micron.
     sens_resp : float array
@@ -332,12 +307,15 @@ def disperse(
         WCS object for the grism image
     naxis : tuple
         Dimensions of the grism image (naxis[0], naxis[1])
-    oversample_factor : int, optional
-        Factor by which to oversample the wavelength grid
     basis_models : list[Callable], optional
         Flux distributions to evaluate at each wavelength. Typically these will be single
         polynomial orders, e.g. [lambda x: x, lambda x: x^2], ...] the coefficients of which
         are linearly fit later.
+    trace_pdt : `~jwst.wfss_contam.trace_pdt.TracePDT`, optional
+        If provided, used in place of the exact "detector" to "grism_detector" transform
+        to approximate the dispersed pixel positions via a cached, precomputed grid.
+        This substantially speeds up dispersion at the cost of a small amount of accuracy.
+        If None (the default), the exact transform is evaluated for every pixel.
 
     Returns
     -------
@@ -350,6 +328,9 @@ def disperse(
         f"{mp.current_process()} dispersing {n_input_sources} "
         f"sources in order {order} with total number of pixels: {len(xs)}"
     )
+    if np.max(source_ids_per_pixel) < np.iinfo(np.uint16).max and np.min(source_ids_per_pixel) >= 0:
+        # Conversion to 16-bit makes the array faster to sort later
+        source_ids_per_pixel = source_ids_per_pixel.astype(np.uint16, copy=False)
     width = 1.0
     height = 1.0
     x0 = xs + 0.5 * width
@@ -370,21 +351,16 @@ def disperse(
     x0_sky, y0_sky = direct_image_wcs(x0, y0, with_bounding_box=False)
     del x0, y0
 
-    # native spacing does not change much over the detector, so just put in one x0, y0
-    lambdas = _determine_native_wl_spacing(
-        x0_sky[0],
-        y0_sky[0],
-        sky_to_imgxy,
-        imgxy_to_grismxy,
-        order,
-        wmin,
-        wmax,
-        oversample_factor=oversample_factor,
-    )
     dlam = lambdas[1] - lambdas[0]
     nlam = len(lambdas)
+    # Keep 1-d versions of lambdas, source_ids_per_pixel around so the gather below
+    # can index based on these smaller arrays instead of the (nlam, n_pixels) broadcasts.
+    n_pixels = len(source_ids_per_pixel)
+    lam_grid = lambdas
+    source_ids_1d = source_ids_per_pixel
 
     # Interpolate the input fluxes onto the wavelength grid of the dispersed image
+    fluxes_1d = None
     if len(band_wavelengths) >= 2:
         # interp1d does not handle NaNs, so replace with interplation that assumes
         # flat spectrum at the edges and linear interpolation in the interior,
@@ -402,6 +378,7 @@ def disperse(
         fluxes = interp_fn(lambdas)  # (nlam, n_pixels)
     else:
         # constant flux across all wavelengths
+        fluxes_1d = fluxes[0]
         fluxes = np.repeat(fluxes[0][np.newaxis, :], nlam, axis=0)
     source_ids_per_pixel = np.repeat(source_ids_per_pixel[np.newaxis, :], nlam, axis=0)
 
@@ -412,12 +389,14 @@ def disperse(
         imgxy_to_grismxy,
         lambdas,
         order,
+        trace_pdt=trace_pdt,
     )
     del x0_sky, y0_sky
 
     # If none of the dispersed pixel indexes are within the image frame,
     # return a null result without wasting time doing other computations
-    if x0s.min() >= naxis[0] or x0s.max() < 0 or y0s.min() >= naxis[1] or y0s.max() < 0:
+    possible = (x0s > -0.5) & (x0s < naxis[0] + 0.5) & (y0s > -0.5) & (y0s < naxis[1] + 0.5)
+    if not possible.any():
         return
 
     # Discretize x and y coordinates to integer pixel values, keeping track of the fractional area
@@ -428,9 +407,15 @@ def disperse(
     xs, ys, areas, index = get_clipped_pixels(x0s, y0s, padding, naxis[0], naxis[1], width, height)
     del x0s, y0s
 
-    lambdas = np.take(lambdas, index)
-    fluxes = np.take(fluxes, index)
-    source_ids_per_pixel = np.take(source_ids_per_pixel, index)
+    # get_clipped_pixels treats its (nlam, n_pixels) inputs as flattened in C order,
+    # so `index` decomposes into a (wavelength, pixel) pair. Use that to gather
+    # lambdas and source_ids_per_pixel from their small 1-D arrays, which is cheaper to compute
+    # than, e.g., lambdas=np.take(lambdas, index)
+    lam_idx, pixel_idx = np.divmod(index, n_pixels)
+    lambdas = lam_grid[lam_idx]
+    source_ids_per_pixel = source_ids_1d[pixel_idx]
+    # This trick can only be applied to fluxes if they are flat-spectrum
+    fluxes = fluxes_1d[pixel_idx] if fluxes_1d is not None else np.take(fluxes, index)
 
     # Evaluate basis models on the 1-D lambda array.
     # even after np.take this is element-wise so this is still full resolution

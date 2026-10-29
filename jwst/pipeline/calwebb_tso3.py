@@ -33,6 +33,7 @@ class Tso3Pipeline(Pipeline):
     class_alias = "calwebb_tso3"
 
     spec = """
+        save_results = boolean(default=True)  # Save output products by default
     """  # noqa: E501
 
     # Define alias to steps
@@ -45,7 +46,6 @@ class Tso3Pipeline(Pipeline):
         "photom": photom_step.PhotomStep,
         "white_light": white_light_step.WhiteLightStep,
     }
-    reference_file_types = ["gain", "readnoise"]
 
     def process(self, input_data):
         """

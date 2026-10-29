@@ -1,3 +1,4 @@
+import dataclasses
 import logging
 import multiprocessing as mp
 import time
@@ -7,13 +8,38 @@ import numpy as np
 from astropy.stats import SigmaClip
 from astropy.utils.exceptions import AstropyUserWarning
 from photutils.background import Background2D, MedianBackground
-from stdatamodels.jwst import datamodels
 
 from jwst.wfss_contam.disperse import disperse
+from jwst.wfss_contam.trace_pdt import (
+    build_trace_pdt,
+    get_grism_detector_transform,
+    native_wavelength_grid,
+)
 
 log = logging.getLogger(__name__)
 
-__all__ = ["background_subtract", "Observation"]
+__all__ = ["background_subtract", "Observation", "SimulatedCutout"]
+
+
+@dataclasses.dataclass
+class SimulatedCutout:
+    """
+    Lightweight container for simulated cutout data and attributes.
+
+    This class looks a lot like `~stdatamodels.jwst.datamodels.SlitModel` but avoids the
+    schema-copy and schema-validation overhead of constructing a full SlitModel for
+    every dispersed source in every spectral order. These objects are purely internal
+    bookkeeping and are never added to an output datamodel.
+    """
+
+    source_id: int
+    name: str
+    xstart: int
+    ystart: int
+    xsize: int
+    ysize: int
+    data: np.ndarray
+    spectral_order: int
 
 
 def background_subtract(
@@ -111,7 +137,7 @@ class Observation:
     assumptions about the spectral properties of the direct image sources.
     When the `disperse_order` method is called one or more times, two products are created:
     the simulated dispersed image (``simulated_image`` attribute) and
-    the simulated `~stdatamodels.jwst.datamodels.MultiSlitModel` (``simulated_slits`` attribute).
+    the simulated source cutouts (``simulated_cutouts`` attribute).
     """
 
     def __init__(
@@ -193,8 +219,8 @@ class Observation:
         # Create lists of pixels labeled in segmentation map
         self._create_pixel_list()
 
-        # Initialize the output MultiSlitModel
-        self.simulated_slits = datamodels.MultiSlitModel()
+        # Initialize the output list of cutouts
+        self.simulated_cutouts = []
 
         # Initialize the simulated dispersed image
         self.simulated_image = np.zeros(self.dims, float)
@@ -213,13 +239,13 @@ class Observation:
     def chunk_sources(
         self,
         order,
-        wmin,
-        wmax,
+        lambdas,
         sens_waves,
         sens_response,
         selected_ids=None,
         max_pixels=1e5,
         basis_models=None,
+        trace_pdt=None,
     ):
         """
         Chunk the sources into groups of max_pixels.
@@ -228,10 +254,9 @@ class Observation:
         ----------
         order : int
             Spectral order to process
-        wmin : float
-            Minimum wavelength for dispersed spectra
-        wmax : float
-            Maximum wavelength for dispersed spectra
+        lambdas : ndarray
+            Wavelengths at which to compute dispersed pixel values for this order,
+            precomputed once per order.
         sens_waves : ndarray
             Wavelength array from photom reference file
         sens_response : ndarray
@@ -245,6 +270,9 @@ class Observation:
             Legendre polynomials from 1st order up to a given max order, e.g.
             [P1(x), P2(x), ...], the coefficients of which are linearly fit later.
             If None, no models are included in the output.
+        trace_pdt : `~jwst.wfss_contam.trace_pdt.TracePDT`, optional
+            Precomputed pixel dispersion table for this spectral order.
+            If None, no lookup table is used.
 
         Returns
         -------
@@ -300,27 +328,35 @@ class Observation:
                     self.band_wavelengths,
                     chunk_source_ids,
                     order,
-                    wmin,
-                    wmax,
+                    lambdas,
                     sens_waves,
                     sens_response,
                     self.direct_image_wcs,
                     self.grism_wcs,
                     self.naxis,
-                    self.oversample_factor,
                     basis_models,
+                    trace_pdt,
                 ]
             )
 
         return disperse_args
 
     def disperse_order(
-        self, order, wmin, wmax, sens_waves, sens_response, selected_ids=None, basis_models=None
+        self,
+        order,
+        wmin,
+        wmax,
+        sens_waves,
+        sens_response,
+        selected_ids=None,
+        basis_models=None,
+        pdt_spacing=None,
+        pdt_wl_oversample=1,
     ):
         """
         Disperse the sources for a given spectral order, with multiprocessing.
 
-        The ``simulated_slits`` and ``simulated_image`` attributes are updated in place.
+        The ``simulated_cutouts`` and ``simulated_image`` attributes are updated in place.
 
         Parameters
         ----------
@@ -340,18 +376,82 @@ class Observation:
             Flux distributions to evaluate at each wavelength. Typically these will be single
             polynomial orders, e.g. [lambda x: x, lambda x: x^2], ...] the coefficients of which
             are linearly fit later. If None, no models are included in the output.
+        pdt_spacing : int, optional
+            Spacing of grid points to sample along the x and y axes
+            when building a cached lookup table for the trace-shape transform. If None
+            (the default), no lookup table is used and the exact transform is evaluated directly
+            for every pixel.
+        pdt_wl_oversample : float, optional
+            Oversampling factor for the lookup table's wavelength grid, relative to the
+            native dispersion scale. If None, the lookup table's wavelength grid instead
+            exactly matches the dispersal wavelength grid, allowing
+            `~jwst.wfss_contam.trace_pdt.TracePDT.evaluate_grid` to skip wavelength-axis
+            interpolation entirely. Only used if ``pdt_spacing`` is not None.
         """
+        # Determine the wavelength grid once per order.
+        # native spacing does not vary significantly across the detector, so a single
+        # representative pixel is good enough.
+        imgxy_to_grismxy = get_grism_detector_transform(self.grism_wcs)
+        nx, ny = self.naxis
+        lambdas = native_wavelength_grid(
+            imgxy_to_grismxy,
+            order,
+            wmin,
+            wmax,
+            (nx - 1) / 2.0,
+            (ny - 1) / 2.0,
+            oversample_factor=self.oversample_factor,
+        )
+
+        trace_pdt_obj = None
+        if pdt_spacing is not None:
+            # Determine the spatial bounding box of sources in the WFSS un-dispersed detector frame.
+            # Transform the 4 corners of the direct image / segmentation map into that frame
+            ny_seg, nx_seg = self.seg.shape
+            corners_x = np.array([0.0, nx_seg - 1.0, nx_seg - 1.0, 0.0])
+            corners_y = np.array([0.0, 0.0, ny_seg - 1.0, ny_seg - 1.0])
+            x0_sky, y0_sky = self.direct_image_wcs(corners_x, corners_y, with_bounding_box=False)
+            sky_to_imgxy = self.grism_wcs.get_transform("world", "detector")
+            x0_xy, y0_xy, _, _ = sky_to_imgxy(x0_sky, y0_sky, 1, order)
+            coord_limits = (
+                min(0.0, float(np.floor(np.min(x0_xy)))),
+                max(float(self.naxis[0] - 1), float(np.ceil(np.max(x0_xy)))),
+                min(0.0, float(np.floor(np.min(y0_xy)))),
+                max(float(self.naxis[1] - 1), float(np.ceil(np.max(y0_xy)))),
+            )
+
+            if pdt_wl_oversample is None:
+                trace_pdt_obj = build_trace_pdt(
+                    self.grism_wcs,
+                    order,
+                    wmin,
+                    wmax,
+                    coord_limits,
+                    spacing=pdt_spacing,
+                    lam_grid=lambdas,
+                )
+            else:
+                trace_pdt_obj = build_trace_pdt(
+                    self.grism_wcs,
+                    order,
+                    wmin,
+                    wmax,
+                    coord_limits,
+                    spacing=pdt_spacing,
+                    wave_oversample_factor=pdt_wl_oversample,
+                )
+
         # generate lists of input parameters for the disperse function
         # for each chunk of sources
         disperse_args = self.chunk_sources(
             order,
-            wmin,
-            wmax,
+            lambdas,
             sens_waves,
             sens_response,
             selected_ids=selected_ids,
             max_pixels=self.max_pixels_per_chunk,
             basis_models=basis_models,
+            trace_pdt=trace_pdt_obj,
         )
         t0 = time.time()
         if self.max_cpu > 1:
@@ -388,14 +488,14 @@ class Observation:
         for sid in source_results:
             bounds = source_results[sid]["bounds"]
             img = source_results[sid]["image"]
-            slit = _construct_slitmodel(img, bounds, sid, order)
+            slitmodel = _construct_simulated_cutout(img, bounds, sid, order)
             fluxmodels = source_results[sid].get("model_counts", [])
             for i, fm in enumerate(fluxmodels):
                 # use i+1 indexing because typically the first model will be the linear order
-                # for polynomial fitting. The 0th order is what's already in slit.data
-                setattr(slit, f"fluxmodel_{i + 1}", fm)
+                # for polynomial fitting. The 0th order is what's already in slitmodel.data
+                setattr(slitmodel, f"fluxmodel_{i + 1}", fm)
             self.simulated_image[bounds[2] : bounds[3] + 1, bounds[0] : bounds[1] + 1] += img
-            self.simulated_slits.slits.append(slit)
+            self.simulated_cutouts.append(slitmodel)
 
 
 def _aggregate_by_source(results, sid, source_results):
@@ -465,14 +565,14 @@ def _aggregate_by_source(results, sid, source_results):
     }
 
 
-def _construct_slitmodel(
+def _construct_simulated_cutout(
     img,
     bounds,
     sid,
     order,
 ):
     """
-    Turn an output image from a single source/order into a SlitModel.
+    Turn an output image from a single source/order into a SimulatedCutout.
 
     Parameters
     ----------
@@ -487,18 +587,19 @@ def _construct_slitmodel(
 
     Returns
     -------
-    slit : `jwst.datamodels.SlitModel`
-        Slit model containing the dispersed pixel values
+    SimulatedCutout
+        Simulated source cutout containing the dispersed pixel values
     """
     [thisobj_minx, thisobj_maxx, thisobj_miny, thisobj_maxy] = bounds
-    slit = datamodels.SlitModel()
-    slit.source_id = sid
-    slit.name = f"{sid}"
-    slit.xstart = thisobj_minx + 1  # FITS pixels are 1-indexed, matching extract_2d convention
-    slit.xsize = thisobj_maxx - thisobj_minx + 1
-    slit.ystart = thisobj_miny + 1  # FITS pixels are 1-indexed, matching extract_2d convention
-    slit.ysize = thisobj_maxy - thisobj_miny + 1
-    slit.meta.wcsinfo.spectral_order = order
-    slit.data = img
-
-    return slit
+    return SimulatedCutout(
+        source_id=sid,
+        name=f"{sid}",
+        # FITS pixels are 1-indexed, matching extract_2d convention
+        xstart=thisobj_minx + 1,
+        xsize=thisobj_maxx - thisobj_minx + 1,
+        ystart=thisobj_miny + 1,
+        ysize=thisobj_maxy - thisobj_miny + 1,
+        # Match SlitModel float32 dtype
+        data=img.astype(np.float32, copy=False),
+        spectral_order=order,
+    )

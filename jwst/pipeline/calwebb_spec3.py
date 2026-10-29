@@ -50,6 +50,7 @@ class Spec3Pipeline(Pipeline):
     class_alias = "calwebb_spec3"
 
     spec = """
+        save_results = boolean(default=True)  # Save output products by default
     """  # noqa: E501
 
     # Define aliases to steps
@@ -116,10 +117,15 @@ class Spec3Pipeline(Pipeline):
         # do a direct open of all members in ASN file, e.g.
         input_models = self.prepare_output(input_data, asn_exptypes=asn_exptypes)
 
+        if hasattr(input_models, "asn_table_name") and input_models.asn_table_name:
+            table_name = Path(input_models.asn_table_name).name
+        else:
+            table_name = ""
+
         # Immediately update the ASNTABLE keyword value in all inputs,
         # so that all outputs get the new value
         for model in input_models:
-            model.meta.asn.table_name = Path(input_models.asn_table_name).name
+            model.meta.asn.table_name = table_name
 
         # For the first round of development we will assume that the input
         # is ALWAYS an ASN. There's no use case for anyone ever running a
@@ -314,7 +320,7 @@ class Spec3Pipeline(Pipeline):
             self._populate_wfss_sregion(x1d_output, source_models)
 
             if self.save_results:
-                x1d_filename = output_file + "_x1d.fits"
+                x1d_filename = self.make_output_path(basepath=output_file, ext="fits", suffix="x1d")
                 log.info("Saving the final x1d product as %s", x1d_filename)
                 x1d_output.save(x1d_filename)
 

@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 import numpy as np
@@ -10,17 +9,16 @@ from gwcs import wcs
 from stcal.alignment.util import compute_s_region_keyword, sregion_to_footprint
 
 import jwst
+from jwst.associations.asn_from_list import asn_from_list
 from jwst.datamodels.container import ModelContainer
 from jwst.datamodels.utils.wfss_multispec import make_wfss_multiexposure
 from jwst.extract_1d.tests.helpers import mock_miri_lrs_fs_func, mock_nirspec_fs_one_slit_func
 from jwst.pipeline import Spec3Pipeline
-from jwst.stpipe import Step
 
 N_SOURCES = 5
 N_EXPOSURES = 4
 INPUT_WFSS = "mock_wfss_x1d.fits"
 INPUT_WFSS_2 = "mock_wfss_2_x1d.fits"
-INPUT_ASN = "mock_wfss_asn.json"
 
 
 def simple_wcs_wfss():
@@ -119,8 +117,8 @@ def wfss_exp_spec3(source_id):
     return multi
 
 
-@pytest.fixture
-def spec3_wfss_asn(tmp_cwd):
+@pytest.fixture(scope="module")
+def spec3_wfss_asn(tmp_cwd_module):
     model = make_wfss_multiexposure([wfss_exp_spec3(N_SOURCES - i) for i in range(N_SOURCES)])
     model.save(INPUT_WFSS)
     model2 = model.copy()
@@ -129,7 +127,7 @@ def spec3_wfss_asn(tmp_cwd):
         spec.group_id = "8"
         spec.s_region = new_s_region
     model2.save(INPUT_WFSS_2)
-    os.system(f"asn_from_list -o {INPUT_ASN} --product-name test {INPUT_WFSS} {INPUT_WFSS_2}")
+    return asn_from_list([INPUT_WFSS, INPUT_WFSS_2], product_name="test")
 
 
 @pytest.fixture
@@ -179,19 +177,16 @@ def run_spec3_wfss(spec3_wfss_asn, monkeypatch):
         jwst.pipeline.calwebb_spec3, "make_wfss_multiexposure", mock_wfss_multiexposure
     )
 
-    args = [
-        "calwebb_spec3",
-        INPUT_ASN,
-    ]
-    Step.from_cmdline(args)
+    Spec3Pipeline.call(spec3_wfss_asn, save_results=True, output_dir="out")
 
 
 def test_spec3_wfss(run_spec3_wfss):
     """Smoke test to ensure pipeline runs for WFSS input."""
-    files_created = os.listdir(".")
-    assert "test_x1d.fits" in files_created
-    assert "test_c1d.fits" in files_created
-    with dm.open("test_x1d.fits") as x1d:
+    outpath = Path("out")
+    x1d_file = outpath / "test_x1d.fits"
+    assert x1d_file.exists()
+    assert (outpath / "test_c1d.fits").exists()
+    with dm.open(x1d_file) as x1d:
         assert (
             x1d.spec[0].s_region
             == "POLYGON ICRS  247.901987783 30.174116268 247.864126916 30.158804440 247.846405241 30.190721550 247.852683427 30.193419510 247.851405241 30.195721550 247.888569817 30.211692493 247.906987783 30.179116268 247.900617472 30.176539964"

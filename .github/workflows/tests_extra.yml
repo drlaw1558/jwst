@@ -38,7 +38,7 @@ concurrency:
 permissions: {}
 
 env:
-  CRDS_PATH: /tmp/data/crds_cache
+  CRDS_PATH: ~/.crds_cache
   CRDS_OBSERVATORY: jwst
   CRDS_SERVER_URL: ${{ inputs.crds_server || 'https://jwst-crds.stsci.edu' }}
   CRDS_CLIENT_RETRY_COUNT: 3
@@ -49,7 +49,7 @@ jobs:
     if: (github.repository == 'spacetelescope/jwst' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'run extra tests')))
     runs-on: ubuntu-latest
     steps:
-      - if: inputs.crds_context
+      - if: inputs.crds_context == ''
         id: latest-context
         run: >
           echo latest-context=$(
@@ -66,7 +66,7 @@ jobs:
     if: (github.repository == 'spacetelescope/jwst' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'run extra tests')))
     needs:
       - crds
-    uses: OpenAstronomy/github-actions-workflows/.github/workflows/tox.yml@e5af21e4ae37af089a73bb032e10b78b0e746174 # v3.0.1
+    uses: OpenAstronomy/github-actions-workflows/.github/workflows/tox.yml@1285b95e32c783cfa40eb2ffbd6ca4cd023fb884 # v3.2.2
     with:
       setenv: |
         CRDS_PATH: ${{ needs.crds.outputs.path }}
